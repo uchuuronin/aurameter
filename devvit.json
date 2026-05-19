@@ -8,34 +8,42 @@
   "menu": {
     "items": [
       {
-        "label": "Mop comments",
-        "description": "Remove this comment and all child comments. This might take a few seconds to run.",
-        "location": "comment",
+        "label": "Open aurameter",
+        "description": "Open the aurameter dashboard for this subreddit.",
+        "location": "subreddit",
         "forUserType": "moderator",
-        "endpoint": "/internal/menu/mop-comment"
+        "endpoint": "/internal/menu/open-dashboard"
       },
       {
-        "label": "Mop post comments",
-        "description": "Remove all comments of this post. This might take a few seconds to run.",
+        "label": "Check vibe",
+        "description": "Score this post on demand and show the result as a toast.",
         "location": "post",
         "forUserType": "moderator",
-        "endpoint": "/internal/menu/mop-post"
+        "endpoint": "/internal/menu/check-vibe"
       }
     ]
   },
-  "forms": {
-    "mopComment": "/internal/form/mop-comment-submit",
-    "mopPost": "/internal/form/mop-post-submit"
-  },
   "triggers": {
-    "onAppInstall": "/internal/triggers/on-app-install"
+    "onAppInstall": "/internal/triggers/on-app-install",
+    "onPostSubmit": "/internal/triggers/on-post-submit",
+    "onPostDelete": "/internal/triggers/on-post-delete",
+    "onCommentDelete": "/internal/triggers/on-comment-delete"
+  },
+  "scheduler": {
+    "tasks": {
+      "dailyRollup": {
+        "cron": "0 7 * * *",
+        "endpoint": "/internal/jobs/daily-rollup"
+      }
+    }
   },
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch"
   },
   "permissions": {
-    "reddit": true
+    "reddit": true,
+    "redis": true
   },
   "dev": {
     "subreddit": "aurameter_dev"
