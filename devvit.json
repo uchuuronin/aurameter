@@ -9,14 +9,14 @@
     "items": [
       {
         "label": "Open aurameter",
-        "description": "Open the aurameter dashboard for this subreddit.",
+        "description": "Open the aurameter mod dashboard for this subreddit.",
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/open-dashboard"
       },
       {
         "label": "Check vibe",
-        "description": "Score this post on demand and show the result as a toast.",
+        "description": "Score this post on demand and show the result.",
         "location": "post",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/check-vibe"
@@ -36,6 +36,10 @@
         "endpoint": "/internal/jobs/daily-rollup"
       }
     }
+  },
+  "customPost": {
+    "height": "tall",
+    "endpoint": "/internal/custom-post"
   },
   "scripts": {
     "build": "vite build",
