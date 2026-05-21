@@ -9,7 +9,7 @@ import { bridge } from './bridge.js';
 interface Props {
   config: SubConfig;
   presets: Array<{ name: string; label: string; description: string }>;
-  automodYaml: string | null;
+  onConfigUpdate: (config: SubConfig) => void;
 }
 
 const aggressivenessOptions: Array<{ value: Aggressiveness; label: string; description: string }> = [
@@ -41,30 +41,46 @@ function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
 
 const divider = <hr style={{ border: 'none', borderTop: '1px solid var(--border)' }} />;
 
-export function SettingsPanel({ config, presets, automodYaml }: Props) {
+export function SettingsPanel({ config, presets, onConfigUpdate }: Props) {
   const [copied, setCopied] = useState(false);
   const [showPresets, setShowPresets] = useState(false);
 
-  function setAggressiveness(a: Aggressiveness) {
-    bridge.send({ type: 'patch_config', patch: { aggressiveness: a } });
+  async function setAggressiveness(a: Aggressiveness) {
+    try {
+      const { config: updated } = await bridge.patchConfig({ aggressiveness: a });
+      onConfigUpdate(updated);
+    } catch (err) {
+      console.error('patchConfig failed:', err);
+    }
   }
 
-  function toggleObserveOnly() {
-    bridge.send({ type: 'patch_config', patch: { observeOnly: !config.observeOnly } });
+  async function toggleObserveOnly() {
+    try {
+      const { config: updated } = await bridge.patchConfig({ observeOnly: !config.observeOnly });
+      onConfigUpdate(updated);
+    } catch (err) {
+      console.error('patchConfig failed:', err);
+    }
   }
 
-  function applyPreset(name: string) {
-    bridge.send({ type: 'apply_preset', preset: name });
-    setShowPresets(false);
+  async function applyPreset(name: string) {
+    try {
+      const { config: updated } = await bridge.applyPreset(name);
+      onConfigUpdate(updated);
+      setShowPresets(false);
+    } catch (err) {
+      console.error('applyPreset failed:', err);
+    }
   }
 
-  function copyAutomod() {
-    bridge.send({ type: 'copy_automod' });
-    if (automodYaml) {
-      void navigator.clipboard.writeText(automodYaml).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      });
+  async function copyAutomod() {
+    try {
+      const { yaml } = await bridge.copyAutomod();
+      await navigator.clipboard.writeText(yaml);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('copyAutomod failed:', err);
     }
   }
 

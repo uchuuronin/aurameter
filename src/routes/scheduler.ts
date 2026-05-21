@@ -7,13 +7,16 @@
  * the next post.
  *
  * this is the only place that does O(n log n) work. the hot path is O(1).
+ *
+ * active subs come from an explicit sorted-set index (am:installs),
+ * NOT from redis.keys() — which devvit's redis doesn't support and which
+ * would be O(n) blocking anyway.
  */
 
 import { Hono } from 'hono';
 import type { TriggerResponse } from '@devvit/web/shared';
-import { redis } from '@devvit/web/server';
 import type { SignalName } from '../core/signals/types.js';
-import { readFeatureSamples, saveBaseline, keys } from '../core/engine/storage.js';
+import { readFeatureSamples, saveBaseline, listInstalls } from '../core/engine/storage.js';
 import { computeBaseline } from '../core/calibration/baseline.js';
 
 export const scheduler = new Hono();
@@ -52,28 +55,11 @@ async function rollupSubreddit(sub: string): Promise<void> {
   }
 }
 
-/**
- * get the list of subreddits that have config stored.
- * scans keys matching am:cfg:* to find them.
- */
-async function getActiveSubs(): Promise<string[]> {
-  // devvit's redis client exposes scan or keys depending on version.
-  // we use a pattern scan; if the api isn't available we return empty.
-  try {
-    // @ts-expect-error – redis.keys may not be typed but is available at runtime
-    const matched: string[] = await redis.keys('am:cfg:*');
-    return matched.map((k) => k.replace('am:cfg:', ''));
-  } catch {
-    console.warn('[aurameter] rollup: could not enumerate subs via redis.keys');
-    return [];
-  }
-}
-
 scheduler.post('/daily-rollup', async (c) => {
-  const subs = await getActiveSubs();
+  const subs = await listInstalls();
 
   if (subs.length === 0) {
-    console.log('[aurameter] dailyRollup: no active subs found');
+    console.log('[aurameter] dailyRollup: no active subs in install index');
     return c.json<TriggerResponse>({ status: 'success' }, 200);
   }
 

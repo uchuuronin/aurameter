@@ -1,13 +1,17 @@
 /**
- * shared types for the dashboard custom post message protocol.
+ * shared types for the dashboard.
  *
- * the custom post iframe communicates with the devvit server via
- * postMessage (window.parent.postMessage). both sides import from here
- * so the protocol is typed end-to-end.
+ * the custom-post webview communicates with the devvit server via regular HTTP
+ * (see bridge.ts and routes/api.ts). this file holds the shapes used on both
+ * sides: payload shapes returned by the api, plus display helpers.
+ *
+ * the older devvit-message postMessage protocol is no longer used for
+ * client→server calls. we keep `serverMessage` defined for any future
+ * server-pushed updates that might arrive through window.onmessage.
  */
 
 import type { SignalName } from '../signals/types.js';
-import type { SubConfig, SignalConfig, Aggressiveness, SignalVisibility } from '../config/types.js';
+import type { SubConfig, SignalVisibility } from '../config/types.js';
 
 // ── payload shapes returned by the api ───────────────────────────────────────
 
@@ -40,19 +44,9 @@ export interface dashboardPayload {
   presets: Array<{ name: string; label: string; description: string }>;
 }
 
-// ── messages from iframe → parent (devvit server) ─────────────────────────────
-
-export type clientMessage =
-  | { type: 'ready' }
-  | { type: 'navigate'; postId: string }
-  | { type: 'patch_signal'; signal: SignalName; patch: Partial<SignalConfig> }
-  | { type: 'patch_config'; patch: { aggressiveness?: Aggressiveness; observeOnly?: boolean } }
-  | { type: 'apply_preset'; preset: string }
-  | { type: 'copy_automod' }
-  | { type: 'refresh_queue' }
-  | { type: 'refresh_trends'; days: number };
-
-// ── messages from parent → iframe ─────────────────────────────────────────────
+// ── server → client push messages (future use) ───────────────────────────────
+// All current data flow is fetch-based; these only fire if the server
+// proactively pushes via window.onmessage / devvit-message envelopes.
 
 export type serverMessage =
   | { type: 'init'; payload: dashboardPayload }

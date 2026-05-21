@@ -6,7 +6,6 @@ import { forms } from './routes/forms.js';
 import { menu } from './routes/menu.js';
 import { triggers } from './routes/triggers.js';
 import { scheduler } from './routes/scheduler.js';
-import { customPost } from './routes/customPost.js';
 
 const app = new Hono();
 const internal = new Hono();
@@ -15,7 +14,6 @@ internal.route('/menu', menu);
 internal.route('/form', forms);
 internal.route('/triggers', triggers);
 internal.route('/jobs', scheduler);
-internal.route('/custom-post', customPost);
 
 app.route('/api', api);
 app.route('/internal', internal);

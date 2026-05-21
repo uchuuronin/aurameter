@@ -5,6 +5,15 @@
     "dir": "dist/server",
     "entry": "index.cjs"
   },
+  "post": {
+    "dir": "dist/client",
+    "entrypoints": {
+      "default": {
+        "entry": "dashboard/index.html",
+        "height": "tall"
+      }
+    }
+  },
   "menu": {
     "items": [
       {
@@ -36,14 +45,6 @@
         "endpoint": "/internal/jobs/daily-rollup"
       }
     }
-  },
-  "customPost": {
-    "height": "tall",
-    "endpoint": "/internal/custom-post"
-  },
-  "scripts": {
-    "build": "vite build",
-    "dev": "vite build --watch"
   },
   "permissions": {
     "reddit": true,

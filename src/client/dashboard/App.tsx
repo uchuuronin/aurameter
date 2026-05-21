@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'preact/hooks';
-import type { dashboardPayload, trendSeries, serverMessage } from '../../core/dashboard/types.js';
+import type { dashboardPayload, trendSeries } from '../../core/dashboard/types.js';
 import type { SignalName } from '../../core/signals/types.js';
 import { bridge } from './bridge.js';
 import { QueuePanel } from './QueuePanel.js';
@@ -34,44 +34,28 @@ export function App() {
   const [data, setData] = useState<dashboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('queue');
-  const [automodYaml, setAutomodYaml] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const handleMessage = useCallback((msg: serverMessage) => {
-    switch (msg.type) {
-      case 'init':
-        setData(msg.payload);
-        setError(null);
-        break;
-      case 'config_update':
-        setData((prev) => prev ? { ...prev, config: msg.config } : prev);
-        break;
-      case 'queue_update':
-        setData((prev) => prev ? { ...prev, queue: msg.queue } : prev);
-        setRefreshing(false);
-        break;
-      case 'trends_update':
-        setData((prev) => prev ? { ...prev, trends: msg.trends } : prev);
-        break;
-      case 'automod_yaml':
-        setAutomodYaml(msg.yaml);
-        break;
-      case 'error':
-        setError(msg.message);
-        break;
-    }
+  // Initial load
+  useEffect(() => {
+    let cancelled = false;
+    bridge.init()
+      .then((payload) => { if (!cancelled) setData(payload); })
+      .catch((err: Error) => { if (!cancelled) setError(err.message); });
+    return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    const unsubscribe = bridge.onMessage(handleMessage);
-    bridge.send({ type: 'ready' });
-    return unsubscribe;
-  }, [handleMessage]);
-
-  function refreshQueue() {
+  const refreshQueue = useCallback(async () => {
     setRefreshing(true);
-    bridge.send({ type: 'refresh_queue' });
-  }
+    try {
+      const { queue } = await bridge.refreshQueue();
+      setData((prev) => prev ? { ...prev, queue } : prev);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   if (error) {
     return (
@@ -159,6 +143,15 @@ export function App() {
                 config={data.config.signals[sig]}
                 trend={trendBySignal[sig]}
                 trendDays={trendDays}
+                onUpdate={(signalName, signalConfig) => {
+                  setData((prev) => prev ? {
+                    ...prev,
+                    config: {
+                      ...prev.config,
+                      signals: { ...prev.config.signals, [signalName]: signalConfig },
+                    },
+                  } : prev);
+                }}
               />
             ))}
           </div>
@@ -166,7 +159,11 @@ export function App() {
 
         {activeTab === 'settings' && (
           <div style={{ background: 'var(--surface)', borderRadius: 'var(--radius-lg)', padding: '14px', border: '1px solid var(--border)' }}>
-            <SettingsPanel config={data.config} presets={data.presets} automodYaml={automodYaml} />
+            <SettingsPanel
+              config={data.config}
+              presets={data.presets}
+              onConfigUpdate={(config) => setData((prev) => prev ? { ...prev, config } : prev)}
+            />
           </div>
         )}
       </div>

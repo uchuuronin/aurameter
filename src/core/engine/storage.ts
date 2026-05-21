@@ -6,6 +6,7 @@
  * single place to migrate schemas if redis apis change.
  *
  * key conventions:
+ *   am:installs                        → sorted set of installed subs (score=installedAt)
  *   am:cfg:<sub>                       → subconfig (json hash field 'data')
  *   am:post:<postId>                   → per-post results hash
  *     fields: 'sub', 'scores' (json), 'reasons' (json), 'ts'
@@ -26,6 +27,7 @@ import type { signalBaseline } from '../calibration/baseline.js';
 // ── key builders ─────────────────────────────────────────────────────────────
 
 export const keys = {
+  installs:  () => `am:installs`,
   config:    (sub: string) => `am:cfg:${sub}`,
   post:      (postId: string) => `am:post:${postId}`,
   queue:     (sub: string) => `am:queue:${sub}`,
@@ -37,6 +39,24 @@ export const keys = {
 /** today's date in yyyy-mm-dd utc. */
 export function dateBucket(d: Date = new Date()): string {
   return d.toISOString().slice(0, 10);
+}
+
+// ── install index ────────────────────────────────────────────────────────────
+
+/** Register a sub as installed. Called from onAppInstall. Idempotent. */
+export async function registerInstall(sub: string): Promise<void> {
+  await redis.zAdd(keys.installs(), { score: Date.now(), member: sub });
+}
+
+/** Mark a sub as uninstalled. Called from onAppRemoved if/when wired. */
+export async function unregisterInstall(sub: string): Promise<void> {
+  await redis.zRem(keys.installs(), [sub]);
+}
+
+/** Enumerate all installed subs. Used by the daily rollup. */
+export async function listInstalls(): Promise<string[]> {
+  const entries = await redis.zRange(keys.installs(), 0, -1, { by: 'score' });
+  return entries.map((e) => e.member);
 }
 
 // ── config helpers ────────────────────────────────────────────────────────────
@@ -108,6 +128,9 @@ export function computePriority(results: SignalResults): number {
 
 export async function addToQueue(sub: string, postId: string, priority: number): Promise<void> {
   await redis.zAdd(keys.queue(sub), { score: priority, member: postId });
+  // Cap at 500 most recent high-priority posts. Stale low-priority entries
+  // (and entries whose underlying am:post:<id> hash expired after 30 days)
+  // can still linger; we accept that for now.
   await redis.zRemRangeByRank(keys.queue(sub), 0, -501);
 }
 
@@ -143,23 +166,23 @@ const sampleWindowSize = 1000;
  * record raw feature values for one post into capped sorted sets.
  * one zadd per (signal, feature) pair. fire-and-forget: failures don't block scoring.
  *
- * we use the post's ts as the sorted set score so the window slides by
- * recency (oldest entries are the ones dropped when we cap at 1000).
+ * the sorted-set score is the raw feature value (that's what the rollup reads).
+ * the member is `${postId}:${feature}` so two posts with identical feature values
+ * don't collide and overwrite each other.
  */
 export async function recordSamples(
   sub: string,
+  postId: string,
   results: SignalResults
 ): Promise<void> {
-  const ts = Date.now();
   for (const signal of ['tea', 'time', 'clown', 'slop'] as const) {
     const features = results[signal].rawFeatures;
-    const postId = `${ts}`; // good-enough unique key within the zset
     for (const [feature, value] of Object.entries(features)) {
       if (typeof value !== 'number' || !isFinite(value)) continue;
+      // skip the synthetic _composite01 field — that's not a raw feature
+      if (feature.startsWith('_')) continue;
       const key = keys.samples(sub, signal, feature);
-      // score = value, member = `${postId}:${feature}` to ensure uniqueness
       await redis.zAdd(key, { score: value, member: `${postId}:${feature}` });
-      // cap at window size
       await redis.zRemRangeByRank(key, 0, -(sampleWindowSize + 1));
     }
   }

@@ -5,7 +5,9 @@
   "license": "BSD-3-Clause",
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.client.config.ts",
+    "build:server": "vite build",
+    "build:client": "vite build --config vite.client.config.ts",
     "deploy": "npm run type-check && npm run lint && npm run test && devvit upload",
     "dev": "devvit playtest",
     "launch": "npm run deploy && devvit publish",

@@ -14,15 +14,23 @@ interface Props {
   config: SignalConfig;
   trend: trendSeries | undefined;
   trendDays: number;
+  /** Called with the updated single-signal config after a successful patch.
+   *  Parent (App.tsx) merges it into the full SubConfig. */
+  onUpdate: (signal: SignalName, config: SignalConfig) => void;
 }
 
-export function SignalCard({ signal, config, trend, trendDays }: Props) {
+export function SignalCard({ signal, config, trend, trendDays, onUpdate }: Props) {
   const meta = signalMeta[signal];
   const todayCount = trend?.points[trend.points.length - 1]?.count ?? 0;
   const totalCount = trend?.points.reduce((s, p) => s + p.count, 0) ?? 0;
 
-  function setVisibility(v: SignalVisibility) {
-    bridge.send({ type: 'patch_signal', signal, patch: { visibility: v } });
+  async function setVisibility(v: SignalVisibility) {
+    try {
+      const { config: updatedSignal } = await bridge.patchSignal(signal, { visibility: v });
+      onUpdate(signal, updatedSignal);
+    } catch (err) {
+      console.error('patchSignal failed:', err);
+    }
   }
 
   const pillColor =
