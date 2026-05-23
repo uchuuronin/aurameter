@@ -1,14 +1,15 @@
 {
-  "generatedAt": "2026-05-21T06:54:06.330347+00:00",
+  "generatedAt": "2026-05-23T07:08:02.758628+00:00",
   "corpus": {
-    "human": 150,
-    "llm": 150,
-    "skipped": 0
+    "human": 643,
+    "llm": 531,
+    "skipped": 90
   },
   "metrics": {
-    "auc": 1.0,
-    "precision": 1.0,
-    "recall": 1.0
+    "auc": 0.8895063746322327,
+    "cvAuc": 0.8965787672713341,
+    "precision": 0.7985611510791367,
+    "recall": 0.8345864661654135
   },
   "killThreshold": 0.7,
   "mode": "synthetic",

@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import roc_auc_score, precision_score, recall_score
 
 from features import feature_vector, FEATURE_KEYS
@@ -95,50 +95,73 @@ def main():
         X, y, test_size=args.test_size, random_state=args.seed, stratify=y
     )
 
-    # Standardise so coefficients are comparable, but we BAKE the scaling back
-    # into the exported coefficients so slop.ts can keep using raw features.
-    mu = Xtr.mean(axis=0)
-    sd = Xtr.std(axis=0)
-    sd[sd == 0] = 1.0
-    Xtr_s = (Xtr - mu) / sd
+    # Fit DIRECTLY on raw features. The previous version standardised, fit, then
+    # divided coefficients by each feature's std-dev to "un-standardise" them.
+    # That division blew up on near-constant features (e.g. fingerprintRate is
+    # ~all-zeros, so sd ~ 0) -> huge, sign-unstable coefficients that inverted
+    # the score and broke parity. Fitting on raw features means clf.coef_ IS the
+    # exported coefficient: no rescaling, nothing to blow up, runtime == trainer.
+    #
+    #   C=0.3            -> stronger L2 regularisation; squashes weak/dead
+    #                       features toward 0 (overfit defence on a small corpus).
+    #   class_weight     -> corpus is imbalanced (e.g. 720 human / 200 llm);
+    #     "balanced"        this reweights classes so AUC isn't inflated by the
+    #                       model just leaning toward the majority class.
+    #   solver/max_iter  -> liblinear is stable for small-n, mixed-scale raw
+    #                       features; more iters since we no longer standardise.
+    def make_clf():
+        return LogisticRegression(
+            max_iter=5000, C=0.3, solver="liblinear", class_weight="balanced"
+        )
 
-    clf = LogisticRegression(max_iter=2000, C=1.0)
-    clf.fit(Xtr_s, ytr)
+    clf = make_clf()
+    clf.fit(Xtr, ytr)
 
-    # Evaluate on held-out, scaling test set with TRAIN stats (no leakage).
-    Xte_s = (Xte - mu) / sd
-    proba = clf.predict_proba(Xte_s)[:, 1]
+    # Evaluate on the held-out split (raw features, no scaling step).
+    proba = clf.predict_proba(Xte)[:, 1]
     auc = float(roc_auc_score(yte, proba)) if len(set(yte)) > 1 else float("nan")
     preds = (proba >= 0.5).astype(int)
     prec = float(precision_score(yte, preds, zero_division=0))
     rec = float(recall_score(yte, preds, zero_division=0))
     log(f"held-out AUC={auc:.3f}  precision={prec:.3f}  recall={rec:.3f}")
 
-    # Un-standardise coefficients so slop.ts uses RAW features:
-    #   z = b0 + sum(w_i * (x_i - mu_i)/sd_i)
-    #     = (b0 - sum(w_i*mu_i/sd_i)) + sum((w_i/sd_i) * x_i)
-    coef_s = clf.coef_[0]
-    intercept_s = float(clf.intercept_[0])
-    raw_coef = coef_s / sd
-    raw_bias = intercept_s - float(np.sum(coef_s * mu / sd))
+    # 5-fold cross-validated AUC: the honest, low-variance number to trust and
+    # to quote in the README. A single split on a small corpus is noisy; this
+    # averages over 5 splits. Expect it to come in a touch below held-out AUC.
+    cv_auc = float("nan")
+    if min(n_human, n_llm) >= 5:
+        try:
+            cv_auc = float(
+                cross_val_score(make_clf(), X, y, cv=5, scoring="roc_auc").mean()
+            )
+            log(f"5-fold CV AUC={cv_auc:.3f}  <-- trust this one")
+        except Exception as e:  # pragma: no cover
+            log(f"CV AUC skipped ({e})")
+
+    # Raw fit -> coefficients export directly. No un-standardisation.
+    raw_coef = clf.coef_[0]
+    raw_bias = float(clf.intercept_[0])
 
     weights = {"bias": float(raw_bias)}
     for k, w in zip(FEATURE_KEYS, raw_coef):
         weights[k] = float(w)
 
-    killed = (not np.isnan(auc)) and auc < AUC_KILL_THRESHOLD
+    # Prefer the cross-validated AUC for the kill decision: a single lucky split
+    # shouldn't be allowed to ship weights that 5-fold CV would have killed.
+    decision_auc = cv_auc if not np.isnan(cv_auc) else auc
+    killed = (not np.isnan(decision_auc)) and decision_auc < AUC_KILL_THRESHOLD
     mode = "boilerplate" if killed else "synthetic"
     # In boilerplate mode, only the top ~5% fire: raise the score>=1 threshold.
     decision_thresholds = [0.90, 0.95, 0.98] if killed else [0.50, 0.70, 0.85]
 
     if killed:
-        log(f"AUC {auc:.3f} < {AUC_KILL_THRESHOLD} -> KILL THRESHOLD HIT.")
+        log(f"decision AUC {decision_auc:.3f} < {AUC_KILL_THRESHOLD} -> KILL THRESHOLD HIT.")
         log("Exporting in DEGRADED 'boilerplate detector' mode (top ~5%, high precision).")
 
     report = {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "corpus": {"human": n_human, "llm": n_llm, "skipped": skipped},
-        "metrics": {"auc": auc, "precision": prec, "recall": rec},
+        "metrics": {"auc": auc, "cvAuc": cv_auc, "precision": prec, "recall": rec},
         "killThreshold": AUC_KILL_THRESHOLD,
         "mode": mode,
         "decisionThresholds": decision_thresholds,

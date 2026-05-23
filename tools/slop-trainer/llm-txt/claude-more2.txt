@@ -1,0 +1,193 @@
+=====
+
+My landlord is keeping my entire $2,400 security deposit and claiming "carpet damage" from my cat. I have move-in photos showing the carpet was already stained and frayed, and I have a vet record showing my cat is declawed. He didn't provide an itemized list within the window my state requires — he just sent a single text saying "deposit forfeited, carpet." I've lived there two years, always paid on time. Can he keep the whole deposit on a verbal claim with no itemization, and does the missing itemized statement help me?
+
+location: Wisconsin
+
+=====
+
+TIFU by setting up an "out of office" auto-reply that quietly insulted my entire company.
+
+So I was leaving for a two-week vacation and feeling a little spicy. As a JOKE — for my own amusement, to read once and then delete — I typed out a fake out-of-office that said something like "I am currently unavailable and, frankly, so is my will to live in this place. For anything urgent, ask [coworker] who actually knows what's going on, unlike management."
+
+I wrote it to laugh at it. Then I was going to replace it with the real, professional one.
+
+You see where this is going. I hit save, my flight notification popped up, I panicked-packed, and I left. The joke version went live. To everyone. Including the CEO, who emailed me on day three. I didn't see it because I was, you know, on vacation with my phone off.
+
+I came back to 47 emails, a meeting invite ominously titled "chat," and a coworker who texted me "DUDE your auto-reply" with eleven exclamation points. Apparently my "out of office" had been auto-replying to every single email for two weeks, including to a major client who emailed asking if everything was "okay over there."
+
+TL;DR: wrote a joke out-of-office to amuse myself, accidentally deployed it company-wide, told the entire org including the CEO that I'd lost the will to live, and let a client read it for two weeks straight.
+
+=====
+
+I bought a used car from a private seller three weeks ago. The title said "clean," the seller swore it had "never been in an accident," and I have that in a text message. Yesterday I took it to a mechanic for an oil change and he showed me clear evidence of a major prior collision and frame repair — welds, mismatched paint, a bent component. A CARFAX I pulled afterward shows a reported accident the seller never disclosed. I paid $9,000 cash. Do I have any recourse against a private seller who lied in writing, or does "as is" on a private sale leave me stuck?
+
+location: Virginia
+
+=====
+
+TIFU by trying to be romantic and proposing during a "surprise" that my girlfriend had already planned a surprise inside of.
+
+Months of planning. I rented out a little section of the rooftop restaurant where we had our first date. I told her we were going to a "casual dinner with friends." I coordinated with the staff, hid the ring, briefed the waiter, the whole production.
+
+What I did not know: she had also been planning a surprise. For ME. It was my birthday week, and she'd organized a surprise party at that EXACT restaurant, on the same night, having coordinated with the SAME staff, who — bless them — assumed the two events were one event and merged them.
+
+So I walk in ready to propose to my girlfriend in an intimate rooftop moment, and instead twenty of our friends jump out yelling SURPRISE while I have a ring box in my jacket and a speech in my head. She's confused why I look like I'm about to faint. I'm confused why our friends are here. The waiter, trying to help, loudly asks "should I bring out the ring now or after the cake?"
+
+So that's how I accidentally proposed in front of twenty people at my own surprise birthday party while my girlfriend was mid-explanation about how SHE surprised ME. She said yes. Through tears. While very confused. Our friends thought the whole thing was an elaborate planned bit and have not stopped praising my "genius double surprise." It was not genius. It was chaos.
+
+TL;DR: planned a private proposal at the same restaurant, on the same night, with the same staff, that my girlfriend independently picked for my surprise party. The two collided. I proposed in front of a crowd by accident. Engaged now.
+
+=====
+
+My elderly father added my name to his bank account "for convenience" years ago so I could help pay his bills. He passed away last month. Now my siblings are saying that because my name was on the account, the balance (~$30,000) should be split among all of us as part of his estate, and that I'd be "stealing" if I treated it as mine. The account is a joint account with right of survivorship. There's no will. Where does the law actually land on this — does a joint account with survivorship pass to me directly, or is it part of the estate to be divided?
+
+location: Ohio
+
+=====
+
+TIFU by enthusiastically waving back at someone for thirty seconds before realizing they were waving at the person behind me.
+
+This sounds minor. It was not minor in the moment, and the fallout was worse.
+
+I'm at the airport. I see, across the terminal, a woman waving big and warm in my direction. I don't immediately recognize her but I have a terrible memory for faces, so I assume she's someone I know — a coworker? An old friend? I commit. I wave back, big smile, I start walking toward her, I do the little "oh my gosh hi!" face. I'm fully bought in.
+
+I get closer. Her smile fades into confusion. I realize, with the slow horror of a man watching his own funeral, that she was waving at someone directly behind me — her actual friend, who is now also walking toward her, past me, while I stand there mid-wave like an idiot greeting no one.
+
+But here's the FU. Instead of just playing it cool and walking past, my panic brain decided to commit to a NEW bit. I pretended I'd been waving at someone behind HER. So I kept walking, past her, waving at a random man near the gate who I'd never met, who now thought I knew him. He squinted. I committed harder. I said "heyyy! good to see you!" to this stranger. He said, slowly, "...do I know you?" and I said "it's been too long!" and kept walking.
+
+I did not stop walking until I reached a different terminal. I bought a coffee I didn't want just to have somewhere to be.
+
+TL;DR: waved back at someone who wasn't waving at me, then to save face pretended I was waving at a stranger behind her, greeted that stranger like an old friend, and had to flee to a different terminal. Two separate people now think I'm insane.
+
+=====
+
+I work for a small company and was just told I'm being switched from a salaried employee to an "independent contractor," effective next pay period — same desk, same boss, same hours (9 to 5, in office, fully directed by my manager), but now no benefits, no overtime, and I'd have to pay self-employment tax. They said it's to "cut costs." Nothing about my actual job is changing except the paperwork. This feels wrong but I don't know the rules. Is reclassifying someone as a contractor while keeping them working exactly like an employee legal?
+
+location: Illinois
+
+=====
+
+I co-signed an apartment lease for my younger brother because he had no credit. He moved out four months ago without telling me and stopped paying rent. I just got a call from a collections agency about $6,800 in back rent and damages, and it's already hit my credit. My brother is ignoring my calls. The lease has both our names. Am I fully on the hook for the whole amount even though I never lived there and got no notice he'd left? And can I do anything to recover it from him, or come after him legally?
+
+location: Texas
+
+=====
+
+TIFU by lying about my weekend plans to get out of a work event, then posting photographic evidence of the lie to the company Slack myself.
+
+I did not want to go to the mandatory "fun" team-building Saturday. So I told my manager I had a "family commitment out of town" that I "couldn't get out of." She was very understanding. I felt a little guilty but mostly free.
+
+My actual weekend plan was to go to a concert two hours away with friends. Great concert. Amazing, actually. I had the time of my life, completely guilt-free, having gotten away with my little white lie.
+
+Here is my downfall. Our company has a Slack channel called #weekend-wins where people post fun photos of what they did. I am an active poster. It is, apparently, muscle memory at this point. On Sunday morning, riding the high of a great show, I posted a photo of me at the concert — with the dated ticket stub clearly visible — captioned "best Saturday in years!!!"
+
+To the company Slack. The same Saturday I'd claimed I had an unmissable out-of-town family commitment. My manager is in that channel. My manager liked the post before, I assume, the realization hit her, because the like later disappeared.
+
+She didn't say anything directly. She just scheduled a 1:1 titled "alignment" and opened it by asking, with a very flat expression, how my "family commitment" went. I have never wished so hard to be deleted from a database.
+
+TL;DR: lied about family plans to skip a work event, went to a concert instead, then voluntarily posted timestamped photo proof of the concert to the company Slack where my manager saw it. Caught myself in my own lie with my own evidence.
+
+=====
+
+My neighbor's contractor parked a dumpster on my property (clearly past the property line, I have a survey) during their renovation without ever asking me. It's been there six weeks. It's killed a section of my lawn and blocked my side gate. I've asked the neighbor twice to move it and they keep saying "the contractor will handle it" and nothing happens. Can I require them to move it and make them pay for the lawn damage? And is it legal for me to do anything about it myself if they keep ignoring me?
+
+location: North Carolina
+
+=====
+
+A dog bit my child at a public park. The owner gave me their name and number at the scene and admitted the dog "had nipped before." My child needed stitches and we have ER bills. Now the owner is ghosting me — won't answer calls or texts. Animal control has a report on file. The owner has homeowner's insurance as far as I know. What are my actual options for getting the medical bills covered, and does the owner's admission that the dog had bitten before change anything legally?
+
+location: Florida
+
+=====
+
+TIFU by trying to quietly leave a party and instead announcing my departure to the entire room via a baby monitor.
+
+The "Irish exit" is an art form. You leave without the long goodbye, you slip into the night, you text "had a great time!" the next day. I am a master of this craft. Or I was.
+
+I'm at a friend's house party. Their baby is asleep upstairs and there's a baby monitor on the kitchen counter so they can hear if she wakes. I, ready to leave, go upstairs to grab my coat from the bedroom — which, unbeknownst to me, is the same room the baby is sleeping in, and which contains the OTHER end of the monitor.
+
+So I'm in this dark room, grabbing my coat, and I'm muttering to myself the way you do when you're tipsy and pleased with your escape. Out loud. Things like "okay, sneaky sneaky, let's gooo," and "haha they'll never know," and — this is the killer — "thank GOD I can leave before [host] corners me about the timeshare thing again."
+
+Every word of this went through the monitor. To the kitchen. Where roughly twelve people, including the host, were standing. In crystal-clear audio. They heard a disembodied voice narrate my entire stealth escape, including my very specific complaint about the host's timeshare.
+
+I came downstairs to a silent kitchen and twelve faces. The host said, very quietly, "the monitor's on, by the way." I did not do an Irish exit. I did a full, mortified, apologetic American exit with extended goodbyes and one very awkward conversation about a timeshare I do, in fact, never want to hear about again.
+
+TL;DR: tried to sneak out of a party, narrated my escape out loud in a room containing a live baby monitor, and broadcast my whole plan plus an insult about the host to the entire kitchen.
+
+=====
+
+My employer hasn't paid me for my last two weeks of work. I quit (gave proper notice), and now they're saying they'll only release my final paycheck if I sign a document agreeing not to "say anything negative about the company" online or to other employers. I'm owed about $2,100 in regular wages I already earned. Can they legally withhold wages I've already earned until I sign a non-disparagement agreement? That feels like blackmail but I don't know if it's actually illegal.
+
+location: California
+
+=====
+
+TIFU by confidently giving a tour of "my" new office building to a group of strangers who did not work there and neither, it turns out, did I yet.
+
+First day at a new job. I show up early, badge not activated yet, but the door's propped open so I walk in. I'm nervous and trying to project confidence. As I'm wandering trying to find HR, a small group of people walk in behind me looking equally lost, and one of them asks me, "Hi, are you with the orientation?"
+
+Now. The correct answer was "I think so, I'm new, let's find out together." Instead, my nervous brain, desperate to seem like I belonged, said "Yes! Right this way." And I just... started giving them a tour. Of a building I had been inside for ninety seconds.
+
+I pointed at rooms. "And this is, uh, one of our conference rooms." (It was a supply closet.) "Kitchen's down here, I believe." (It was not.) "And over here we have... the, um, collaborative space." (It was someone's actual office, and that someone was in it, and looked up very confused.)
+
+I led six adults around a building I did not know, with total confidence, for almost ten minutes. They nodded. They asked questions. I improvised answers. "How many floors?" "Several!" It only ended when an actual employee with an actual clipboard found us and said "...are you the new analyst? Your orientation's in the other building. And who are these people?"
+
+These people, it turned out, were here for a completely different company that subleased part of the building. I had hijacked another company's visitors and given them a fictional tour of the wrong office on my first day before I'd even clocked in.
+
+TL;DR: started a new job, was mistaken for an orientation guide, confidently gave a fully fabricated tour of a building I'd been in for ninety seconds, to strangers who didn't even work for my company.
+
+=====
+
+My ex and I broke up and she kept a laptop that's mine — I bought it, it's in my name, I have the receipt and the original packaging. She's now refusing to give it back, saying I "basically gifted it" to her because she used it sometimes while we lived together. I never gave it to her. She just won't return it. It's worth about $1,500. The breakup was not amicable. What's the legal way to get my own property back when an ex won't return it, short of just showing up, which I don't want to do?
+
+location: Pennsylvania
+
+=====
+
+I'm a freelancer and a client is refusing to pay a $4,000 invoice for work I completed and delivered per our signed contract. They're now claiming the work was "not what they wanted," even though they approved each milestone in writing along the way and have been using the deliverables (a website I built, which is live right now). The contract clearly states payment terms and that approval of milestones constitutes acceptance. They've stopped responding to invoices. What's my realistic path to actually collecting, and does their continued use of the live site help my case?
+
+location: New York
+
+=====
+
+TIFU by trying to impress my in-laws with my cooking and accidentally serving them a centerpiece.
+
+First time hosting my wife's parents for a holiday dinner. I wanted everything perfect. I'd seen these gorgeous decorative arrangements online — little bowls with sliced citrus, cranberries, and sprigs of rosemary, sometimes with cinnamon sticks. Festive! Beautiful! I made several and placed them around the table as centerpieces.
+
+I also made a cranberry-citrus relish as an actual side dish. It looked, I now realize, almost identical to the decorative bowls. Same cranberries. Same citrus. Same rosemary garnish.
+
+You can see the collision coming. In the chaos of plating, I lost track of which bowls were food and which were décor. I confidently served my father-in-law a generous spoonful from a "relish" bowl that was, in fact, a centerpiece — containing decorative (read: not washed, not edible-prepped, possibly waxed) fruit, a cinnamon stick, and what I'm fairly sure was a sprig of rosemary I'd spray-misted with water to "keep fresh."
+
+He took a big, polite, son-in-law-impressing bite. His face did a thing. He chewed a decorative orange peel and a cinnamon stick with the stoicism of a man determined to be supportive. He swallowed. He said, "...very rustic." My wife clocked it instantly, looked at the table, and whispered "honey, that's the centerpiece."
+
+My father-in-law, to his eternal credit, said "the flavor's really coming through" and took ANOTHER bite to spare my feelings, at which point my wife physically removed the bowl from in front of him.
+
+TL;DR: made decorative centerpieces that looked identical to a real side dish, served my father-in-law a spoonful of unwashed waxed décor on the first holiday I hosted, and he ate it twice to be nice.
+
+=====
+
+My HOA is fining me $50/day for a fence I built, claiming I never got approval. The thing is, I DID submit the architectural request form, and I have a stamped, dated copy showing it was received by the HOA office, plus an email from a board member at the time saying it "looked fine." That board member has since left. The current board says they "have no record" of my approval and that the previous member "wasn't authorized" to approve it informally. The fines are now over $1,500. Does my dated, stamped form and the email hold up against their "no record" claim?
+
+location: Arizona
+
+=====
+
+TIFU by accidentally entering a 5K race I was only there to watch, and placing.
+
+My friend was running a charity 5K and I came to cheer her on. I am not a runner. I want to be extremely clear about that. I came in jeans and a hoodie, holding a coffee, purely to stand at the finish line and yell her name.
+
+I was standing near the start, in the crowd, when the announcer counted down and a huge mass of runners surged forward. I was, geographically, part of that mass. The crowd carried me. And instead of stepping aside like a reasonable person, my brain — for reasons I will be unpacking in therapy — decided that stepping out now would be "more disruptive" than just... jogging a little until I found a gap.
+
+I never found the gap. I just kept going. In jeans. Holding a coffee. The crowd was too thick to exit gracefully, then we were on a closed road, then there were volunteers cheering, and at some point I crossed a psychological threshold where it felt easier to finish a 5K than to explain why I was leaving it.
+
+I finished the 5K. In jeans. Still holding the (now empty) coffee. And because it was a small race and most participants were very casual, I apparently placed third in my age group. They gave me a medal. The announcer congratulated "the gentleman in denim." My friend, the actual runner, finished four minutes after me and was speechless. There's a photo on the charity's Facebook of me crossing the finish line in full street clothes looking like I'm being chased.
+
+TL;DR: came to a 5K only to spectate, got swept into the start, was too socially anxious to exit, accidentally ran the whole race in jeans holding a coffee, and placed third in my age group.
+
+=====
+
+I let a friend borrow my car for "a quick errand" and they got a parking ticket and a red-light camera ticket while driving it. The tickets came to me since the car's registered in my name. My friend says they'll "pay me back eventually" but it's been two months and the city is now adding late fees and threatening to affect my registration. The tickets total about $280 plus growing late fees. Am I legally responsible for these since the car is mine, even though I wasn't driving? And can I make my friend pay, or am I stuck dealing with the city myself?
+
+location: Georgia
