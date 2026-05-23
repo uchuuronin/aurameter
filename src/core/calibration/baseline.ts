@@ -66,22 +66,25 @@ export function calibrate(
 /**
  * discretise a 0..1 composite score into an integer score for a given signal.
  *
- * thresholds for 0..maxScore mapping:
+ * For the canonical 0..5 and 0..3 scales we use hand-tuned thresholds:
  *   maxScore=5: [0.20, 0.40, 0.60, 0.80]
  *   maxScore=3: [0.33, 0.66, 0.85]
+ * For any other maxScore (e.g. a per-sub override of 2 or 4) we fall back to
+ * evenly-spaced thresholds so the full range is still reachable.
  *
- * for tea (min=1), score is clamped to [1, maxScore].
- * for others, score can be 0.
+ * All signals can score 0; there is no longer a per-signal minimum.
  */
 export function discretise(
   composite01: number,
   maxScore: number,
-  signalName: string
+  _signalName: string
 ): number {
   const thresholds =
     maxScore === 5
       ? [0.20, 0.40, 0.60, 0.80]
-      : [0.33, 0.66, 0.85];
+      : maxScore === 3
+        ? [0.33, 0.66, 0.85]
+        : Array.from({ length: Math.max(0, maxScore) }, (_, i) => (i + 1) / (maxScore + 1));
 
   let score = 0;
   for (const t of thresholds) {
@@ -90,8 +93,6 @@ export function discretise(
   }
 
   score = Math.min(score, maxScore);
-
-  if (signalName === 'tea') score = Math.max(1, score);
 
   return score;
 }

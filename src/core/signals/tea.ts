@@ -1,8 +1,8 @@
 /**
- * Tea ☕ : drama intensity (1 to 5 cups).
+ * Tea ☕ : drama intensity (0 to 5 cups).
  *
- * Five features, weighted sum, mapped to 1–5 via thresholds.
- * Minimum is 1 so every post gets at least one cup and the flair always renders.
+ * Five features, weighted sum, mapped to 0–5 via thresholds.
+ * Score 0 means the ☕ is omitted from the flair entirely.
  *
  * Processing budget: ~5 ms per post. Five regex passes plus one wordCount.
  */
@@ -75,13 +75,14 @@ export const teaExtractor: SignalExtractor = {
       cliffScore * 0.15 +
       titleScore * 0.15;
 
-    // Map to 1–5. Minimum 1 so flair always renders.
+    // Map to 0–5. Score 0 means the ☕ is omitted from the flair.
     // Per-sub percentile calibration replaces this fixed mapping post-Day 4.
     let score: number;
-    if (composite < 0.15) score = 1;
-    else if (composite < 0.30) score = 2;
-    else if (composite < 0.50) score = 3;
-    else if (composite < 0.70) score = 4;
+    if (composite < 0.10) score = 0;
+    else if (composite < 0.22) score = 1;
+    else if (composite < 0.38) score = 2;
+    else if (composite < 0.55) score = 3;
+    else if (composite < 0.72) score = 4;
     else score = 5;
 
     const confidence: 'low' | 'medium' | 'high' =

@@ -1,0 +1,8 @@
+# synthetic corpus is regenerable (make_synthetic_corpus.py); don't commit it
+corpus/_synthetic/
+# real corpus is the user's to assemble; keep folders, ignore contents
+corpus/human/*.txt
+corpus/llm/*.txt
+# build + run artifacts
+_harness_bundled.mjs
+__pycache__/

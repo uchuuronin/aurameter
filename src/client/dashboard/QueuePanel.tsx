@@ -12,7 +12,7 @@ interface Props {
 }
 
 const signals: SignalName[] = ['tea', 'time', 'clown', 'slop'];
-const maxScores: Record<SignalName, number> = { tea: 5, time: 3, clown: 3, slop: 3 };
+const maxScores: Record<SignalName, number> = { tea: 5, time: 5, clown: 5, slop: 5 };
 
 function ScoreBar({ score, max, color }: { score: number; max: number; color: string }) {
   const pct = max > 0 ? (score / max) * 100 : 0;

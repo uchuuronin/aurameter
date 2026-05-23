@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-05-21T06:54:06.330347+00:00",
+  "corpus": {
+    "human": 150,
+    "llm": 150,
+    "skipped": 0
+  },
+  "metrics": {
+    "auc": 1.0,
+    "precision": 1.0,
+    "recall": 1.0
+  },
+  "killThreshold": 0.7,
+  "mode": "synthetic",
+  "decisionThresholds": [
+    0.5,
+    0.7,
+    0.85
+  ],
+  "seed": 42
+}
