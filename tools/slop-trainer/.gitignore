@@ -3,6 +3,7 @@ corpus/_synthetic/
 # real corpus is the user's to assemble; keep folders, ignore contents
 corpus/human/*.txt
 corpus/llm/*.txt
+llm-txt/*.txt
 # build + run artifacts
 _harness_bundled.mjs
 __pycache__/
