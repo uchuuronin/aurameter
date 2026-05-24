@@ -130,11 +130,10 @@ describe('discretise', () => {
     expect(discretise(0.85, 3, 'slop')).toBe(3);
   });
 
-  it('clamps tea to min 1', () => {
-    expect(discretise(0.0, 5, 'tea')).toBe(1);
-    expect(discretise(0.19, 5, 'tea')).toBe(1);
+  it('allows tea to score 0 (no per-signal floor)', () => {
+    expect(discretise(0.0, 5, 'tea')).toBe(0);
+    expect(discretise(0.19, 5, 'tea')).toBe(0);
   });
-
   it('allows 0 for non-tea signals', () => {
     expect(discretise(0.0, 3, 'slop')).toBe(0);
   });

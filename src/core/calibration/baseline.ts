@@ -81,7 +81,7 @@ export function discretise(
 ): number {
   const thresholds =
     maxScore === 5
-      ? [0.20, 0.40, 0.60, 0.80]
+      ? [0.20, 0.40, 0.60, 0.80, 1.00]
       : maxScore === 3
         ? [0.33, 0.66, 0.85]
         : Array.from({ length: Math.max(0, maxScore) }, (_, i) => (i + 1) / (maxScore + 1));
