@@ -36,7 +36,11 @@ import type {
   SubConfig,
   SignalConfig,
   Aggressiveness,
+  RuleConfig,
+  RuleCondition,
+  RuleAction,
 } from '../../core/config/types.js';
+
 
 type messageHandler = (msg: serverMessage) => void;
 
@@ -107,7 +111,23 @@ class ApiBridge {
   async copyAutomod(): Promise<{ yaml: string }> {
     return http<{ yaml: string }>(`/api/config/automod`);
   }
+  
+  async addRule(payload: {
+    label: string;
+    conditions: RuleCondition[];
+    action: RuleAction;
+  }): Promise<{ ok: boolean; rule: RuleConfig; config: SubConfig }> {
+    return http(`/api/config/rule`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
 
+  async deleteRule(id: string): Promise<{ ok: boolean; config: SubConfig }> {
+    return http(`/api/config/rule/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
   onMessage(handler: messageHandler): () => void {
     this.handlers.push(handler);
     return () => {

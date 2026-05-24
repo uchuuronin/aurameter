@@ -14,8 +14,9 @@ import { bridge } from './bridge.js';
 import { QueuePanel } from './QueuePanel.js';
 import { SignalCard } from './SignalCard.js';
 import { SettingsPanel } from './SettingsPanel.js';
+import { RulesPanel } from './RulesPanel.js';
 
-type Tab = 'queue' | 'signals' | 'settings';
+type Tab = 'queue' | 'signals' | 'rules' | 'settings';
 
 const signals: SignalName[] = ['tea', 'time', 'clown', 'slop'];
 const trendDays = 14;
@@ -94,7 +95,7 @@ export function App() {
         </div>
 
         <div style={{ display: 'flex' }}>
-          {(['queue', 'signals', 'settings'] as Tab[]).map((t) => (
+          {(['queue', 'signals', 'rules', 'settings'] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setActiveTab(t)}
@@ -106,7 +107,7 @@ export function App() {
                 fontWeight: activeTab === t ? 600 : 400, fontSize: '13px', cursor: 'pointer',
               }}
             >
-              {t === 'queue' ? `Queue (${data.queue.length})` : t === 'signals' ? 'Signals' : 'Settings'}
+              {t === 'queue' ? `Queue (${data.queue.length})` : t === 'signals' ? 'Signals' : t === 'rules' ? `Rules (${data.config.rules.length})` : 'Settings'}
             </button>
           ))}
         </div>
@@ -155,6 +156,13 @@ export function App() {
               />
             ))}
           </div>
+        )}
+
+        {activeTab === 'rules' && (
+          <RulesPanel
+            config={data.config}
+            onConfigUpdate={(config) => setData((prev) => prev ? { ...prev, config } : prev)}
+          />
         )}
 
         {activeTab === 'settings' && (

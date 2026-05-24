@@ -19,6 +19,8 @@
  *   PATCH /api/config                 patch individual fields
  *   PATCH /api/config/signal/:signal  patch one signal's config
  *   GET   /api/config/automod         export rules as automod yaml
+ *   POST  /api/config/rule           add a custom rule
+ *   DELETE /api/config/rule/:id       delete a custom rule by id
  */
 
 import { Hono } from 'hono';
@@ -37,7 +39,7 @@ import { readAllTrends } from '../core/engine/trends.js';
 import { defaultBaselines } from '../core/calibration/defaults.js';
 import { PRESETS, type PresetName } from '../core/config/presets.js';
 import { ruleToAutoModYaml, describeRule } from '../core/engine/rules.js';
-
+import { validateRulePayload } from '../core/engine/rule-validate.js';
 export const api = new Hono();
 
 /**
@@ -148,6 +150,45 @@ api.patch('/config/signal/:signal', async (c) => {
   };
   await saveConfig(updated);
   return c.json({ ok: true, signal, config: updated.signals[signal] });
+});
+
+/** add a custom automation rule (append to config.rules) */
+api.post('/config/rule', async (c) => {
+  const sub = currentSub();
+  if (!sub) return noSub(c);
+
+  const existing = await loadConfig(sub);
+  if (!existing) return c.json({ error: 'no config for sub' }, 404);
+
+  const raw = await c.req.json<unknown>().catch(() => null);
+  const result = validateRulePayload(raw);
+  if ('error' in result) return c.json({ error: result.error }, 400);
+
+  const updated: SubConfig = {
+    ...existing,
+    rules: [...existing.rules, result.rule],
+  };
+  await saveConfig(updated);
+  return c.json({ ok: true, rule: result.rule, config: updated });
+});
+
+/** delete a custom automation rule by id */
+api.delete('/config/rule/:id', async (c) => {
+  const sub = currentSub();
+  if (!sub) return noSub(c);
+
+  const id = c.req.param('id');
+  const existing = await loadConfig(sub);
+  if (!existing) return c.json({ error: 'no config for sub' }, 404);
+
+  const rules = existing.rules.filter((r) => r.id !== id);
+  if (rules.length === existing.rules.length) {
+    return c.json({ error: 'rule not found' }, 404);
+  }
+
+  const updated: SubConfig = { ...existing, rules };
+  await saveConfig(updated);
+  return c.json({ ok: true, config: updated });
 });
 
 api.get('/queue', async (c) => {
