@@ -85,7 +85,8 @@ function describeAction(action: RuleAction): string {
  * aurameter-only rules into native AutoMod that survives uninstall.
  *
  * Uses the per-sub emoji and scale overrides so the exported YAML references
- * the same flair strings aurameter will actually write.
+ * the same flair strings aurameter will actually write — i.e. the digit-suffix
+ * form "🤖2", matching composeFlair() in engine/flair.ts.
  */
 export function ruleToAutoModYaml(rule: RuleConfig, subConfig: SubConfig): string {
   // We can only export rules whose conditions reference the flair text.
@@ -122,7 +123,8 @@ function flairConditionToYaml(condition: RuleCondition, subConfig: SubConfig): s
   if (!emoji) return null;
 
   // List all integer counts (1..effectiveMax) that satisfy this comparator.
-  const defaultMax = condition.signal === 'tea' ? 5 : 3;
+  // Default max is now 5 for every signal (configurable per sub).
+  const defaultMax = 5;
   const max = subConfig.signals[condition.signal].maxScore ?? defaultMax;
   const satisfying: number[] = [];
   for (let n = 1; n <= max; n++) {
@@ -138,7 +140,8 @@ function flairConditionToYaml(condition: RuleCondition, subConfig: SubConfig): s
     if (ok) satisfying.push(n);
   }
   if (satisfying.length === 0) return null;
-  const flairStrings = satisfying.map((n) => emoji.repeat(n));
+  // Digit-suffix flair strings, e.g. "🤖2", to match what aurameter writes.
+  const flairStrings = satisfying.map((n) => `${emoji}${n}`);
   const quoted = flairStrings.map((s) => `'${s}'`).join(', ');
   return `~link_flair_text (includes-word): [${quoted}]`;
 }

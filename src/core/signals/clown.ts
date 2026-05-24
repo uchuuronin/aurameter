@@ -1,5 +1,5 @@
 /**
- * Clown 🤡 : one-sided framing (0 to 3 clowns).
+ * Clown 🤡 : one-sided framing (0 to 5 clowns).
  *
  * The trickiest signal both technically and socially. Conservative thresholds:
  * defaults to 0 unless multiple features fire.
@@ -68,7 +68,7 @@ function adjectiveValenceAsymmetry(text: string): { score: number; hits: number 
 export const clownExtractor: SignalExtractor = {
   name: 'clown',
   emoji: '🤡',
-  maxScore: 3,
+  maxScore: 5,
 
   extract(post: PostInput, _subConfig: SubConfig): SignalResult {
     const body = post.body;
@@ -111,7 +111,8 @@ export const clownExtractor: SignalExtractor = {
       missingScore * 0.35 +
       strawmanScore * 0.15;
 
-    // Conservative mapping. Require at least 2 features firing to score above 1.
+    // Conservative mapping onto 0–5. Require at least 2 features firing to score
+    // above 1; lean on the composite to reach the top of the scale.
     const firingFeatures = [
       asymmetryHits >= 2,
       justifyMatches >= 2,
@@ -123,8 +124,9 @@ export const clownExtractor: SignalExtractor = {
     if (firingFeatures === 0) score = 0;
     else if (firingFeatures === 1 && composite < 0.30) score = 0;
     else if (firingFeatures === 1) score = 1;
-    else if (firingFeatures === 2) score = 2;
-    else score = 3;
+    else if (firingFeatures === 2) score = composite >= 0.55 ? 3 : 2;
+    else if (firingFeatures === 3) score = composite >= 0.70 ? 5 : 4;
+    else score = 5;
 
     let confidence: 'low' | 'medium' | 'high';
     if (missingReasons || firingFeatures >= 3) confidence = 'high';

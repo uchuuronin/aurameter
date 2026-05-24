@@ -18,6 +18,15 @@ export default defineConfig([
     },
   },
   {
+    // client SPA runs in the browser — layer browser globals (window, document,
+    // etc.) over node so client files don't trip no-undef. Server/core files
+    // keep node-only globals from the block above.
+    files: ['src/client/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
+  {
     files: ['**/*.{js,mjs,cjs,ts,tsx}'],
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',

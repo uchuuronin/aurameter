@@ -1,10 +1,9 @@
 /**
- * Slop 🤖 : synthetic-text likelihood (0 to 3 robots).
+ * Slop 🤖 : synthetic-text likelihood (0 to 5 robots).
  *
- * 10 stylometric features into a logistic regression. The coefficients in this
- * file are PLACEHOLDER weights based on prior research findings; Day 6–7 of the
- * build sprint replaces them with weights fit on a labelled corpus of 200 real
- * pre-2022 AITAH posts + 200 LLM-generated posts.
+ * 10 stylometric features into a logistic regression. The coefficients live in
+ * the auto-generated slop_weights.ts, produced by tools/slop-trainer/fit.py
+ * (fit on a labelled corpus, with an AUC >= 0.70 kill threshold).
  *
  * Frame the public surface as "synthetic-text likelihood", never as a verdict.
  * Per Pangram Labs (2025): perplexity and burstiness alone fail on canonical
@@ -29,6 +28,7 @@ import {
   logistic,
   bucketScore,
 } from '../lib/text.js';
+import { SLOP_WEIGHTS, SLOP_MODE, SLOP_DECISION_THRESHOLDS } from './slop_weights.js';
 
 const GPT_FINGERPRINT_PATTERN = /\b(delve|delv(ing|ed)|tapestry|navigate the complexities|in the realm of|it['']s important to note|on the other hand|moreover|furthermore|in conclusion|firstly|secondly|nuanced|paramount|underscore|underscores|leverag(e|ing|ed))\b/gi;
 
@@ -42,34 +42,20 @@ const QUESTION_PATTERN = /\?/g;
 
 const MAX_BODY_CHARS = 5000;
 
-/**
- * Placeholder logistic-regression coefficients. Replace with fitted values
- * after labelling 400 posts on Day 6.
- *
- * Sign convention: positive coefficient means feature increases synthetic probability.
- * Negative coefficient means feature is more human-like.
- */
-const SLOP_WEIGHTS = {
-  bias: -1.2,
-  // Low variance = more synthetic. We negate variance so high-variance humans get a negative contribution.
-  invSentenceLengthVariance: 0.8,
-  // GPT fingerprints are the strongest single signal.
-  fingerprintRate: 1.5,
-  // Hedge density is medium-strength.
-  hedgeRate: 0.9,
-  // Em-dash rate per 100 words.
-  emDashRate: 0.4,
-  // Oxford comma rate per sentence.
-  oxfordRate: 0.3,
-  // Lower TTR (more repetition) is slightly synthetic-ish.
-  invTypeTokenRatio: 0.5,
-  // High opener diversity is HUMAN; we negate to penalise low diversity.
-  invOpenerDiversity: 0.6,
-  // Fewer questions = more synthetic (LLMs declare more than they ask).
-  invQuestionRate: 0.4,
-  // Profanity is HUMAN. Negative coefficient → presence of profanity reduces slop score.
-  profanityRate: -1.0,
-} as const;
+// SLOP_WEIGHTS, SLOP_MODE, SLOP_DECISION_THRESHOLDS are imported from the
+// auto-generated slop_weights.ts (produced by tools/slop-trainer/fit.py).
+//
+// SLOP_DECISION_THRESHOLDS is a 3-element tuple [a, b, c] tuned for a 0..3
+// bucket mapping. To map onto a 0..5 scale we interpolate two extra
+// breakpoints between the supplied anchors. This keeps the trainer's
+// generated thresholds authoritative while still spreading scores across
+// the full 0..5 range.
+function fiveBandThresholds(
+  t: readonly [number, number, number]
+): [number, number, number, number, number] {
+  const [a, b, c] = t;
+  return [a, (a + b) / 2, b, (b + c) / 2, c];
+}
 
 /** First-word diversity: 1 - (top-word frequency / total sentences). */
 function sentenceOpenerDiversity(sentences: string[]): number {
@@ -89,7 +75,7 @@ function sentenceOpenerDiversity(sentences: string[]): number {
 export const slopExtractor: SignalExtractor = {
   name: 'slop',
   emoji: '🤖',
-  maxScore: 3,
+  maxScore: 5,
 
   extract(post: PostInput, _subConfig: SubConfig): SignalResult {
     const body = post.body;
@@ -161,8 +147,9 @@ export const slopExtractor: SignalExtractor = {
 
     const probability = logistic(linear);
 
-    // Threshold breakpoints for 0–3 mapping.
-    const score = bucketScore(probability, [0.5, 0.7, 0.85]);
+    // Threshold breakpoints for 0–5 mapping, derived from the generated
+    // 0..3 decision thresholds (which respect the trainer's mode).
+    const score = bucketScore(probability, fiveBandThresholds(SLOP_DECISION_THRESHOLDS));
 
     // Reason chips.
     const reasons: string[] = [];
@@ -180,6 +167,9 @@ export const slopExtractor: SignalExtractor = {
     }
     if (profanityHits === 0 && words > 200) {
       reasons.push('No profanity in a long post (mild signal)');
+    }
+    if (SLOP_MODE === 'boilerplate') {
+      reasons.push('Boilerplate/templated-text pattern (high-precision mode)');
     }
 
     let confidence: 'low' | 'medium' | 'high';

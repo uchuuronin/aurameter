@@ -1,5 +1,5 @@
 /**
- * Time ⏰ : urgency (0 to 3 clocks).
+ * Time ⏰ : urgency (0 to 5 clocks).
  *
  * Four features: future-time anchors, crisis-now markers, calendar-deadline
  * words, and past-anchored suppressors. Past markers SUBTRACT from the score,
@@ -26,7 +26,7 @@ const PAST_SUPPRESSOR_PATTERN = /\b(years ago|when i was (a kid|younger|in (scho
 export const timeExtractor: SignalExtractor = {
   name: 'time',
   emoji: '⏰',
-  maxScore: 3,
+  maxScore: 5,
 
   extract(post: PostInput, _subConfig: SubConfig): SignalResult {
     const body = post.body;
@@ -61,11 +61,14 @@ export const timeExtractor: SignalExtractor = {
       futureMatches * 1 -
       pastMatches * 3;
 
+    // Map raw sum to 0–5.
     let score: number;
     if (raw <= 0) score = 0;
-    else if (raw <= 2) score = 1;
-    else if (raw <= 4) score = 2;
-    else score = 3;
+    else if (raw <= 1) score = 1;
+    else if (raw <= 3) score = 2;
+    else if (raw <= 5) score = 3;
+    else if (raw <= 7) score = 4;
+    else score = 5;
 
     // Confidence: low if only future anchors fire, high if crisis + deadline both fire.
     let confidence: 'low' | 'medium' | 'high';
