@@ -6,6 +6,11 @@
  * them back to redis. the hot path (onPostSubmit) then picks them up on
  * the next post.
  *
+ * it also purges action-log entries older than the 90-day retention window
+ * (Block 1 §3): the actionlog sorted set is trimmed by rank on every write to
+ * a hard cap, but the time-based purge is what enforces the actual retention
+ * policy and keeps a low-traffic sub's log from holding ancient entries.
+ *
  * this is the only place that does O(n log n) work. the hot path is O(1).
  *
  * active subs come from an explicit sorted-set index (am:installs),
@@ -16,12 +21,20 @@
 import { Hono } from 'hono';
 import type { TriggerResponse } from '@devvit/web/shared';
 import type { SignalName } from '../core/signals/types.js';
-import { readFeatureSamples, saveBaseline, listInstalls } from '../core/engine/storage.js';
+import {
+  readFeatureSamples,
+  saveBaseline,
+  listInstalls,
+  purgeLogOlderThan,
+} from '../core/engine/storage.js';
 import { computeBaseline } from '../core/calibration/baseline.js';
 
 export const scheduler = new Hono();
 
 const minimumSampleSize = 50;
+
+/** Action-log retention: 90 days, matching the am:resolved marker TTL. */
+const logRetentionMs = 90 * 24 * 60 * 60 * 1000;
 
 const signalFeatures: Record<SignalName, string[]> = {
   tea:   ['stakesDensity', 'castMatches', 'conflictDensity', 'cliffhanger', 'titleHook'],
@@ -52,6 +65,15 @@ async function rollupSubreddit(sub: string): Promise<void> {
 
     await saveBaseline(sub, signal, baseline);
     console.log(`[aurameter] ${sub}/${signal}: baseline updated, sampleSize=${baseline.sampleSize}`);
+  }
+
+  // Purge action-log entries past the retention window. Cheap (one
+  // zRemRangeByScore) and idempotent — safe to run every day even if nothing
+  // is old enough to remove yet.
+  try {
+    await purgeLogOlderThan(sub, Date.now() - logRetentionMs);
+  } catch (err) {
+    console.error(`[aurameter] ${sub}: action-log purge failed:`, err);
   }
 }
 

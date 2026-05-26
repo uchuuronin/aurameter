@@ -18,6 +18,9 @@
  *   /api/config/signal/:signal   (was /api/config/:sub/signal/:signal)
  *   /api/config/preset           (was /api/config/:sub/preset)
  *   /api/config/automod          (was /api/config/:sub/automod)
+ *   /api/queue/dismiss           clear a post from the queue
+ *   /api/queue/handoff           hand a post off to Reddit's native mod UI
+ *   /api/log                     unified action log
  *
  * server→client pushes (if we ever want them) arrive via window.onmessage
  * wrapped as { type: 'devvit-message', data: { message } }. we keep a
@@ -30,6 +33,7 @@ import type {
   queueEntry,
   trendSeries,
   serverMessage,
+  LogEntry,
 } from '../../core/dashboard/types.js';
 import type { SignalName } from '../../core/signals/types.js';
 import type {
@@ -128,6 +132,37 @@ class ApiBridge {
       method: 'DELETE',
     });
   }
+
+  /** Dismiss a post from the queue (safe, reversible). */
+  async dismiss(postId: string): Promise<{ ok: boolean; postId: string }> {
+    return http(`/api/queue/dismiss`, {
+      method: 'POST',
+      body: JSON.stringify({ postId }),
+    });
+  }
+
+  /**
+   * Hand a post off to Reddit's native mod UI. Returns the canonical permalink
+   * for the client to open (the server builds it; the client never does).
+   */
+  async handoff(postId: string): Promise<{ ok: boolean; postId: string; permalink: string }> {
+    return http(`/api/queue/handoff`, {
+      method: 'POST',
+      body: JSON.stringify({ postId }),
+    });
+  }
+
+  /**
+   * Read the unified action log, newest-first. `before` (ts ms) pages back.
+   * This is the data behind the log tab and the 24h passed-through count.
+   */
+  async readLog(opts?: { limit?: number; before?: number }): Promise<{ entries: LogEntry[] }> {
+    const params = new URLSearchParams();
+    params.set('limit', String(opts?.limit ?? 100));
+    if (opts?.before !== undefined) params.set('before', String(opts.before));
+    return http<{ entries: LogEntry[] }>(`/api/log?${params.toString()}`);
+  }
+
   onMessage(handler: messageHandler): () => void {
     this.handlers.push(handler);
     return () => {

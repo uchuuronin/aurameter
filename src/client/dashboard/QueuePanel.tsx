@@ -1,10 +1,23 @@
 /**
- * queue panel — shows the top N posts by composite priority score.
+ * queue panel — shows the top N posts by composite priority score, and lets a
+ * mod work the queue: dismiss the easy ones in place (safe, reversible) or hand
+ * the real ones off to Reddit's native mod UI (deliberate escalation).
+ *
+ * The two actions are intentionally asymmetric (spec §5.2): Dismiss is the calm
+ * secondary button, Take action is the emphatic primary-danger button. The
+ * asymmetry IS the safety feature — they must never look mistakable.
+ *
+ * Navigation goes through openPost() using a server-provided canonical
+ * permalink (spec §6). There is no whole-card onClick and no client-side
+ * /comments/<id> string-building.
  */
 
+import { useState } from 'preact/hooks';
 import type { queueEntry } from '../../core/dashboard/types.js';
 import { signalMeta } from '../../core/dashboard/types.js';
 import type { SignalName } from '../../core/signals/types.js';
+import { bridge } from './bridge.js';
+import { openPost } from './nav.js';
 
 interface Props {
   queue: queueEntry[];
@@ -38,8 +51,72 @@ function formatAge(ms: number): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
-export function QueuePanel({ queue }: Props) {
-  if (queue.length === 0) {
+export function QueuePanel({ queue, onRefresh }: Props) {
+  // Local working copy so dismiss/handoff can optimistically remove a row
+  // before the server round-trip resolves. Seeded from props; when the parent
+  // refreshes and passes a new array, we re-seed via the key on each entry.
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+
+  const visible = queue.filter((e) => !removed.has(e.postId));
+
+  function markRemoved(postId: string) {
+    setRemoved((prev) => new Set(prev).add(postId));
+  }
+  function restore(postId: string) {
+    setRemoved((prev) => {
+      const next = new Set(prev);
+      next.delete(postId);
+      return next;
+    });
+  }
+  function setBusyFor(postId: string, on: boolean) {
+    setBusy((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(postId); else next.delete(postId);
+      return next;
+    });
+  }
+
+  async function dismiss(postId: string) {
+    setError(null);
+    setBusyFor(postId, true);
+    markRemoved(postId); // optimistic
+    try {
+      await bridge.dismiss(postId);
+    } catch (err) {
+      restore(postId); // surface the failure: put the row back
+      setError(`Couldn't dismiss: ${(err as Error).message}`);
+    } finally {
+      setBusyFor(postId, false);
+    }
+  }
+
+  async function takeAction(entry: queueEntry) {
+    setError(null);
+    setBusyFor(entry.postId, true);
+    try {
+      // Hand off first so it's logged + removed from the queue server-side,
+      // THEN navigate to the post. navigateTo() replaces the current view with
+      // the post (the Devvit host effect — the only navigation that works from
+      // inside the web view), so anything after it won't be seen anyway.
+      const { permalink } = await bridge.handoff(entry.postId);
+      const target = permalink || entry.permalink || '';
+      if (!target) {
+        setError("Couldn't open the post: no link was returned.");
+        setBusyFor(entry.postId, false);
+        return;
+      }
+      markRemoved(entry.postId);
+      openPost(target); // navigates away — view changes to the post
+    } catch (err) {
+      setError(`Couldn't hand off: ${(err as Error).message}`);
+      setBusyFor(entry.postId, false);
+    }
+  }
+
+  if (visible.length === 0) {
     return (
       <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: '13px' }}>
         queue is empty — posts will appear here as they are scored
@@ -49,19 +126,25 @@ export function QueuePanel({ queue }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-      {queue.map((entry, idx) => {
+      {error && (
+        <div style={{ padding: '8px 12px', marginBottom: '6px', fontSize: '12px', color: '#fff', background: 'var(--clown)', borderRadius: 'var(--radius)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{error}</span>
+          <button onClick={() => { setError(null); onRefresh(); }} style={{ border: 'none', background: 'transparent', color: '#fff', textDecoration: 'underline', cursor: 'pointer', fontSize: '12px' }}>refresh</button>
+        </div>
+      )}
+      {visible.map((entry, idx) => {
         const scores = entry.result?.scores ?? { tea: 0, time: 0, clown: 0, slop: 0 };
-        const age = entry.result?.ts ? formatAge(Date.now() - entry.result.ts) : '—';
-        const shortId = entry.postId.replace('t3_', '');
+        const age = entry.result?.ts ? formatAge(Date.now() - entry.result.ts) : null;
+        const isBusy = busy.has(entry.postId);
 
         return (
           <div
             key={entry.postId}
-            onClick={() => window.open(`https://reddit.com/comments/${shortId}`, '_blank')}
             style={{
               display: 'grid', gridTemplateColumns: '28px 1fr auto', alignItems: 'center', gap: '8px',
-              padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)',
+              padding: '8px 12px', borderBottom: '1px solid var(--border)',
               background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)',
+              opacity: isBusy ? 0.6 : 1,
             }}
           >
             {/* priority badge */}
@@ -69,18 +152,50 @@ export function QueuePanel({ queue }: Props) {
               {entry.priority}
             </div>
 
-            {/* signal bars */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            {/* signal bars + faint age line */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 }}>
               {signals.map((sig) => (
                 <div key={sig} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <span style={{ fontSize: '10px', width: '14px', textAlign: 'center' }}>{signalMeta[sig].emoji}</span>
                   <ScoreBar score={scores[sig] ?? 0} max={maxScores[sig]} color={signalMeta[sig].color} />
                 </div>
               ))}
+              {age && (
+                <span style={{ fontSize: '10px', color: 'var(--fg-muted)', fontWeight: 400, marginTop: '1px' }}>
+                  posted {age} ago
+                </span>
+              )}
             </div>
 
-            {/* age */}
-            <span style={{ fontSize: '11px', color: 'var(--fg-muted)', whiteSpace: 'nowrap' }}>{age}</span>
+            {/* asymmetric actions: quiet Dismiss, emphatic Take action */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}>
+              <button
+                onClick={() => dismiss(entry.postId)}
+                disabled={isBusy}
+                title="Clear this post from the queue"
+                style={{
+                  fontSize: '11px', padding: '4px 10px', cursor: isBusy ? 'wait' : 'pointer',
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+                  background: 'var(--surface-2)', color: 'var(--fg-muted)', fontWeight: 400,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Dismiss
+              </button>
+              <button
+                onClick={() => takeAction(entry)}
+                disabled={isBusy}
+                title="Open this post in Reddit's mod tools to remove/approve"
+                style={{
+                  fontSize: '11px', padding: '4px 10px', cursor: isBusy ? 'wait' : 'pointer',
+                  border: '1px solid var(--clown)', borderRadius: 'var(--radius)',
+                  background: 'var(--clown)', color: '#fff', fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Take action →
+              </button>
+            </div>
           </div>
         );
       })}

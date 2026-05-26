@@ -1,36 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig.json",
-  "compilerOptions": {
-    "composite": true,
-    "allowUnreachableCode": false,
-    "allowUnusedLabels": false,
-    "exactOptionalPropertyTypes": true,
-    "forceConsistentCasingInFileNames": true,
-    "noImplicitOverride": true,
-    "types": ["node"],
-    "noUncheckedIndexedAccess": true,
-    "noUncheckedSideEffectImports": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "resolveJsonModule": true,
-    "strict": true,
-    "isolatedModules": true,
-    "esModuleInterop": true,
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "skipLibCheck": true,
-    "skipDefaultLibCheck": true,
-    "sourceMap": true,
-    "target": "ES2022",
-    "outDir": "dist/types",
-    "tsBuildInfoFile": "dist/types/tsconfig.tsbuildinfo",
-    "jsx": "react-jsx",
-    "jsxImportSource": "preact",
-    "paths": {
-      "react": ["./node_modules/preact/compat"],
-      "react-dom": ["./node_modules/preact/compat"]
-    }
-  },
-  "include": ["src/**/*", "vite.config.ts"],
-  "exclude": []
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.server.json" },
+    { "path": "./tsconfig.client.json" }
+  ]
 }
