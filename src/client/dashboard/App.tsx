@@ -4,6 +4,8 @@
  * tab layout:
  *   queue    : triage queue (default)
  *   signals  : per-signal cards with sparklines + visibility toggles
+ *   rules    : custom automation rules
+ *   log      : the unified action log (history + undo surface)
  *   settings : aggressiveness, observe-only, preset picker, automod export
  */
 
@@ -15,8 +17,9 @@ import { QueuePanel } from './QueuePanel.js';
 import { SignalCard } from './SignalCard.js';
 import { SettingsPanel } from './SettingsPanel.js';
 import { RulesPanel } from './RulesPanel.js';
+import { LogPanel, PassedThroughLine } from './LogPanel.js';
 
-type Tab = 'queue' | 'signals' | 'rules' | 'settings';
+type Tab = 'queue' | 'signals' | 'rules' | 'log' | 'settings';
 
 const signals: SignalName[] = ['tea', 'time', 'clown', 'slop'];
 const trendDays = 14;
@@ -80,6 +83,17 @@ export function App() {
     data.trends.map((t: trendSeries) => [t.signal, t])
   ) as Partial<Record<SignalName, trendSeries>>;
 
+  const tabs: Tab[] = ['queue', 'signals', 'rules', 'log', 'settings'];
+  function tabLabel(t: Tab): string {
+    switch (t) {
+      case 'queue':    return `Queue (${data!.queue.length})`;
+      case 'signals':  return 'Signals';
+      case 'rules':    return `Rules (${data!.config.rules.length})`;
+      case 'log':      return 'Log';
+      case 'settings': return 'Settings';
+    }
+  }
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)', overflow: 'hidden' }}>
 
@@ -95,7 +109,7 @@ export function App() {
         </div>
 
         <div style={{ display: 'flex' }}>
-          {(['queue', 'signals', 'rules', 'settings'] as Tab[]).map((t) => (
+          {tabs.map((t) => (
             <button
               key={t}
               onClick={() => setActiveTab(t)}
@@ -107,7 +121,7 @@ export function App() {
                 fontWeight: activeTab === t ? 600 : 400, fontSize: '13px', cursor: 'pointer',
               }}
             >
-              {t === 'queue' ? `Queue (${data.queue.length})` : t === 'signals' ? 'Signals' : t === 'rules' ? `Rules (${data.config.rules.length})` : 'Settings'}
+              {tabLabel(t)}
             </button>
           ))}
         </div>
@@ -132,6 +146,7 @@ export function App() {
               </button>
             </div>
             <QueuePanel queue={data.queue} onRefresh={refreshQueue} />
+            <PassedThroughLine />
           </>
         )}
 
@@ -163,6 +178,10 @@ export function App() {
             config={data.config}
             onConfigUpdate={(config) => setData((prev) => prev ? { ...prev, config } : prev)}
           />
+        )}
+
+        {activeTab === 'log' && (
+          <LogPanel />
         )}
 
         {activeTab === 'settings' && (

@@ -38,6 +38,7 @@ import {
   loadBaselines,
   purgePostData,
   registerInstall,
+  logOutcome,
 } from '../core/engine/storage.js';
 import { PRESETS, suggestPreset } from '../core/config/presets.js';
 import type { PostInput, SignalName } from '../core/signals/types.js';
@@ -139,16 +140,25 @@ triggers.post('/on-post-submit', async (c) => {
   const rawResults = scorePost(postInput, config, baselines);
   const results = applyAggressiveness(rawResults, config);
 
+  // snapshot the integer scores once; reused by the log writes below.
+  const scoreSnapshot = {
+    tea: results.tea.score,
+    time: results.time.score,
+    clown: results.clown.score,
+    slop: results.slop.score,
+  } as Record<SignalName, number>;
+
   // Build a one-line score summary for the playtest log so we can see scores
   // without opening the dashboard.
   const scoreSummary = (['tea', 'time', 'clown', 'slop'] as SignalName[])
     .map((s) => `${s}=${results[s].score}`)
     .join(' ');
 
-  // 2. persist results + record samples for next nightly rollup
+  // 2. persist results + record samples for next nightly rollup. These feed
+  //    trends/calibration and the per-post drilldown regardless of whether the
+  //    post ends up queued, so they always run.
   await savePostResult(postId, sub, results);
   const priority = computePriority(results);
-  await addToQueue(sub, postId, priority);
   await recordDailyAggregate(sub, postId, results);
 
   // fire-and-forget: sample recording failures don't block the response
@@ -156,31 +166,77 @@ triggers.post('/on-post-submit', async (c) => {
     console.error('[aurameter] recordSamples failed:', err);
   });
 
-  // 3. observe-only: stop here
-  if (config.observeOnly) {
-    console.log(`[aurameter] ${sub}/${postId}: scored [${scoreSummary}] priority=${priority} (observe-only)`);
-    return c.json<TriggerResponse>({});
-  }
+  // 3. Public flair is the ONLY thing observe-only suppresses. Everything else
+  //    — scoring, rule evaluation, queue/log routing, the dashboard preview —
+  //    runs identically to live mode. Observe-only governs aurameter's
+  //    automatic, *community-facing* output, not whether the queue works or
+  //    whether mods can act. (project-plan §6.7: "the dashboard shows what
+  //    would have happened" — so the queue/log populate for real; only the
+  //    public post stays untouched.)
+  const mode = config.observeOnly ? 'observe-only' : 'LIVE';
+  console.log(`[aurameter] ${sub}/${postId}: scored [${scoreSummary}] priority=${priority} (${mode})`);
 
-  console.log(`[aurameter] ${sub}/${postId}: scored [${scoreSummary}] priority=${priority} (LIVE)`);
-
-  // 4. set flair
-  const flairText = composeFlair(results, config);
-  if (flairText) {
-    try {
-      await reddit.setPostFlair({ subredditName: sub, postId, text: flairText });
-      console.log(`[aurameter] ${sub}/${postId}: set flair "${flairText}"`);
-    } catch (err) {
-      console.error(`[aurameter] setPostFlair failed for ${postId}:`, err);
+  // 4. set flair — skipped entirely in observe-only (the one public-facing effect).
+  if (!config.observeOnly) {
+    const flairText = composeFlair(results, config);
+    if (flairText) {
+      try {
+        await reddit.setPostFlair({ subredditName: sub, postId, text: flairText });
+        console.log(`[aurameter] ${sub}/${postId}: set flair "${flairText}"`);
+      } catch (err) {
+        console.error(`[aurameter] setPostFlair failed for ${postId}:`, err);
+      }
     }
   }
 
-  // 5. evaluate automation rules
+  // 5. evaluate automation rules. Routing is identical in both modes:
+  //    at least one rule matches → queued for a human + logged rule-fired;
+  //    nothing matches → a passed-through log entry, NOT queued.
+  //    A post lands in exactly one place, never both (§1.2 line 31) — which is
+  //    what stops the "passed-through post also sits in the queue and can then
+  //    be actioned a second time" double-count, in either mode.
   const matches = evaluateRules(results, config);
+
+  if (matches.length === 0) {
+    void logOutcome(sub, {
+      postId,
+      outcome: 'passed-through',
+      actor: 'auto',
+      scores: scoreSnapshot,
+    }).catch((err) => console.error('[aurameter] passed-through log failed:', err));
+    return c.json<TriggerResponse>({});
+  }
+
+  // At least one rule matched → this post needs a human. Queue it once (in both
+  // modes, so observe-only is a working triage preview), then handle each match.
+  await addToQueue(sub, postId, priority);
+
   for (const match of matches) {
     try {
+      // In observe-only we DON'T execute the rule's automated side effect — we
+      // record that it would have fired. The post is in the queue and a mod can
+      // still Dismiss / Take-action manually; what's withheld is only
+      // aurameter's *own* automatic action (and, for set_flair, any public
+      // flair). In live mode we execute for real.
+      if (config.observeOnly) {
+        void logOutcome(sub, {
+          postId,
+          outcome: 'rule-fired',
+          actor: 'auto',
+          scores: scoreSnapshot,
+          detail: `would fire: ${match.rule.label}`,
+        }).catch((err) => console.error('[aurameter] rule-fired log failed:', err));
+        continue;
+      }
       await executeAction(sub, postId, match.action);
       console.log(`[aurameter] ${sub}/${postId}: fired rule "${match.rule.label}"`);
+      void logOutcome(sub, {
+        postId,
+        outcome: 'rule-fired',
+        actor: 'auto',
+        scores: scoreSnapshot,
+        detail: match.rule.label,
+      }).catch((err) => console.error('[aurameter] rule-fired log failed:', err));
     } catch (err) {
       console.error(`[aurameter] rule "${match.rule.label}" action failed:`, err);
     }

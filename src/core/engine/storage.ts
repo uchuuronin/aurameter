@@ -14,6 +14,8 @@
  *   am:agg:<sub>:<yyyy-mm-dd>:<sig>    → sorted set of post ids by score, for daily rollups
  *   am:baseline:<sub>:<sig>            → learned baseline (json), flat hash field 'data'
  *   am:samples:<sub>:<sig>:<feature>   → capped sorted set of raw feature values (score=value, member=postId)
+ *   am:actionlog:<sub>                 → sorted set of log entries by ts (score=ts, member=json LogEntry)
+ *   am:resolved:<postId>               → resolution marker (NX, TTL ~90d) so a post is logged-as-resolved once
  *
  * no user data anywhere. required by reddit's public content policy.
  */
@@ -23,6 +25,7 @@ import type { SignalResults } from './score.js';
 import type { SubConfig } from '../config/types.js';
 import type { SignalName } from '../signals/types.js';
 import type { signalBaseline } from '../calibration/baseline.js';
+import type { LogEntry } from '../dashboard/types.js';
 
 // ── key builders ─────────────────────────────────────────────────────────────
 
@@ -34,6 +37,8 @@ export const keys = {
   aggregate: (sub: string, date: string, signal: SignalName) => `am:agg:${sub}:${date}:${signal}`,
   baseline:  (sub: string, signal: SignalName) => `am:baseline:${sub}:${signal}`,
   samples:   (sub: string, signal: SignalName, feature: string) => `am:samples:${sub}:${signal}:${feature}`,
+  actionlog: (sub: string) => `am:actionlog:${sub}`,
+  resolved:  (postId: string) => `am:resolved:${postId}`,
 } as const;
 
 /** today's date in yyyy-mm-dd utc. */
@@ -140,6 +145,126 @@ export async function getTopQueue(
 ): Promise<Array<{ postId: string; priority: number }>> {
   const raw = await redis.zRange(keys.queue(sub), 0, n - 1, { by: 'score', reverse: true });
   return raw.map((entry) => ({ postId: entry.member, priority: entry.score }));
+}
+
+/**
+ * Remove a single post from a sub's triage queue. Used by the dismiss/handoff
+ * endpoints (routes/api.ts) and by queue reconciliation. Idempotent: zRem on a
+ * member that isn't present is a no-op.
+ */
+export async function removeFromQueue(sub: string, postId: string): Promise<void> {
+  await redis.zRem(keys.queue(sub), [postId]);
+}
+
+// ── the unified action log (Block 1 §3) ───────────────────────────────────────
+//
+// One sorted set per sub, scored by ts(ms), member = JSON-encoded LogEntry.
+// Mirrors how am:queue and am:agg:* sets are already used (range-by-time reads,
+// range-by-rank trims, zRemRangeByScore for the purge) — not a new primitive.
+
+/** Hard cap on log size between daily purges so a busy sub can't grow unbounded. */
+const LOG_HARD_CAP = 5000;
+
+/**
+ * Short, collision-resistant id embedded in each log entry's JSON so that two
+ * entries written in the same millisecond are still distinct sorted-set members
+ * (members must be unique). Same shape as rule-validate.ts::newRuleId.
+ */
+function newLogId(): string {
+  return `log-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Append a fully-formed log entry. Callers normally use logOutcome() instead,
+ * which stamps id + ts for them. zAdd then trim-by-rank to the hard cap.
+ */
+export async function appendLog(sub: string, entry: LogEntry): Promise<void> {
+  await redis.zAdd(keys.actionlog(sub), { score: entry.ts, member: JSON.stringify(entry) });
+  // keep only the most recent LOG_HARD_CAP entries (lowest-score = oldest get trimmed)
+  await redis.zRemRangeByRank(keys.actionlog(sub), 0, -(LOG_HARD_CAP + 1));
+}
+
+/**
+ * Convenience wrapper: stamps id + ts and appends. So callers in triggers.ts
+ * and api.ts never hand-build an entry (and can't forget the id, which would
+ * risk same-ms member collisions).
+ */
+export async function logOutcome(
+  sub: string,
+  partial: Omit<LogEntry, 'id' | 'ts'> & { ts?: number }
+): Promise<void> {
+  const entry: LogEntry = {
+    id: newLogId(),
+    ts: partial.ts ?? Date.now(),
+    postId: partial.postId,
+    outcome: partial.outcome,
+    actor: partial.actor,
+    scores: partial.scores,
+    ...(partial.detail !== undefined ? { detail: partial.detail } : {}),
+  };
+  await appendLog(sub, entry);
+}
+
+/**
+ * Read log entries newest-first. `limit` caps the number returned; `before`
+ * (a ts in ms) pages further back by returning only entries strictly older
+ * than it. Unparseable members are dropped (forward-compatible if the shape
+ * evolves).
+ */
+export async function readLog(
+  sub: string,
+  opts: { limit: number; before?: number }
+): Promise<LogEntry[]> {
+  const max = opts.before !== undefined ? opts.before - 1 : Date.now();
+  const raw = await redis.zRange(keys.actionlog(sub), 0, max, { by: 'score', reverse: true });
+  const entries: LogEntry[] = [];
+  for (const { member } of raw) {
+    if (entries.length >= opts.limit) break;
+    try {
+      entries.push(JSON.parse(member) as LogEntry);
+    } catch {
+      // drop unparseable members
+    }
+  }
+  return entries;
+}
+
+/** Purge log entries older than `cutoffMs`. Used by the daily scheduler. */
+export async function purgeLogOlderThan(sub: string, cutoffMs: number): Promise<void> {
+  await redis.zRemRangeByScore(keys.actionlog(sub), 0, cutoffMs);
+}
+
+// ── resolution marker (Block 1 §4.4) ──────────────────────────────────────────
+
+const RESOLVED_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 days, matching log retention
+
+/**
+ * Try to claim a post as "resolved" (left the queue) exactly once. Returns true
+ * if THIS caller is the first to mark it resolved, false if a prior
+ * dismiss/handoff/reconcile already did.
+ *
+ * Dismiss and handoff call this so an in-app resolution isn't ALSO logged by
+ * reconciliation; reconciliation gates its own "resolved on Reddit" log entry
+ * on winning this claim, so repeated refreshes by multiple mods don't duplicate.
+ *
+ * Implementation note: we use the read-then-write pattern (get → set → expire)
+ * because that's the redis surface the rest of storage.ts already relies on
+ * (menu.ts uses redis.set(key,value) with two args; TTLs go through
+ * redis.expire(key,seconds)). This is NOT a fully atomic check-and-set: under a
+ * genuine same-millisecond race between two refreshes the marker can be claimed
+ * twice, producing at most one duplicate reconciliation log entry. That is the
+ * exact failure §4.3/§4.4 tolerate (the log is append-only history, not a
+ * correctness gate), so the simpler portable pattern is the right trade here.
+ * If a stronger guarantee is wanted later, swap the body for a native SET ... NX
+ * once that option shape is confirmed in playtest (§9) — callers don't change.
+ */
+export async function claimResolved(postId: string): Promise<boolean> {
+  const key = keys.resolved(postId);
+  const existing = await redis.get(key);
+  if (existing) return false;
+  await redis.set(key, String(Date.now()));
+  await redis.expire(key, RESOLVED_TTL_SECONDS);
+  return true;
 }
 
 // ── daily aggregates ──────────────────────────────────────────────────────────

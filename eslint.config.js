@@ -2,7 +2,6 @@ import { defineConfig } from 'eslint/config';
 import globals from 'globals';
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
-
 export default defineConfig([
   tseslint.configs.recommended,
   {
@@ -12,13 +11,19 @@ export default defineConfig([
       ecmaVersion: 2023,
       globals: globals.node,
       parserOptions: {
-        project: ['./tsconfig.json'],
+        // projectService auto-discovers the correct tsconfig per file using
+        // TypeScript's own project resolution. This handles the project-
+        // references split (tsconfig.client.json / tsconfig.server.json) without
+        // naming each one — the old `project: ['./tsconfig.json']` pointed at the
+        // root config, which now has `files: []` and contains no files, so every
+        // file reported "not found in the project".
+        projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
     },
   },
   {
-    // client SPA runs in the browser — layer browser globals (window, document,
+    // client SPA runs in the browser â€” layer browser globals (window, document,
     // etc.) over node so client files don't trip no-undef. Server/core files
     // keep node-only globals from the block above.
     files: ['src/client/**/*.{ts,tsx}'],

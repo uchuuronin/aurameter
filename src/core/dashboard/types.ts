@@ -24,6 +24,14 @@ export interface queueEntry {
     reasons: Record<SignalName, string[]>;
     ts: number;
   } | null;
+  /**
+   * Canonical post permalink, populated server-side from the live post read at
+   * hydration time (see routes/api.ts reconciliation). Optional because a
+   * transient read failure (PostState 'unknown') keeps the entry without a
+   * fresh permalink. The client never reconstructs this URL itself — see
+   * QueuePanel's openPost() / Block 1 spec §6.
+   */
+  permalink?: string;
 }
 
 export interface trendPoint {
@@ -42,6 +50,40 @@ export interface dashboardPayload {
   queue: queueEntry[];
   trends: trendSeries[];
   presets: Array<{ name: string; label: string; description: string }>;
+}
+
+// ── the unified action log (Block 1 §3) ──────────────────────────────────────
+// One append-only attributed record per subreddit. The queue is the subset of
+// posts still awaiting a decision; the log is the full history underneath it.
+//
+// Privacy line (spec §1.2, enforced at the type level): the log records mod
+// usernames (accountability, like Reddit's native mod log) but NEVER post body,
+// title, or author identity. There is deliberately no field to put author data
+// in — `postId` is enough to build a link-out, and everything human-readable is
+// fetched live from Reddit at view time, never persisted.
+
+export type LogOutcome =
+  | 'passed-through'  // scored but tripped no rule
+  | 'dismissed'       // mod cleared it from the queue in-app
+  | 'approved'        // only emitted if approvals turn out observable (§9 #1)
+  | 'actioned'        // mod clicked "take action" → handed off to Reddit
+  | 'rule-fired'      // a rule matched and an action executed (actor 'auto')
+  | 'config-change';  // any successful config mutation
+
+export interface LogEntry {
+  /** collision-resistant id; same short-random approach as rule-validate.ts. */
+  id: string;
+  /** unix ms; also the sorted-set score. */
+  ts: number;
+  /** null for config-change entries (no single post). */
+  postId: string | null;
+  outcome: LogOutcome;
+  /** mod username, or 'auto' for rule-fired / passed-through / reconciliation. */
+  actor: string;
+  /** signal scores at the time; null for config-change. */
+  scores: Record<SignalName, number> | null;
+  /** short human string: rule label, which config field changed, etc. */
+  detail?: string;
 }
 
 // ── server → client push messages (future use) ───────────────────────────────

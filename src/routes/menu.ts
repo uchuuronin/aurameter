@@ -2,9 +2,20 @@
  * menu handlers. mounted at /internal/menu.
  *
  *   open-dashboard: creates (or navigates to) the mod dashboard custom post.
- *     the post is pinned, mod-distinguished. if a dashboard post already
- *     exists for this sub (stored in redis as am:dashboard-post:<sub>),
- *     we navigate to it instead of creating a duplicate.
+ *     The post is mod-distinguished but NOT pinned — mods reach the dashboard
+ *     through the subreddit ••• mod menu ("Open aurameter"), not from a pinned
+ *     post at the top of the sub. If a dashboard post already exists for this
+ *     sub (stored in redis as am:dashboard-post:<sub>), we navigate to it
+ *     instead of creating a duplicate.
+ *
+ *     Note: the dashboard IS a custom post (that's the only surface a Devvit
+ *     web-view app can render in), so a post always exists — "not pinned" means
+ *     it isn't stickied to the top, not that there's no post. Opening it
+ *     navigates the current view to that post's web view; whether that can be a
+ *     new browser tab rather than same-view is platform-dependent (§9 #4) and
+ *     only confirmable in a real playtest. To keep the dashboard open beside
+ *     the subreddit, a mod can middle/cmd/ctrl-click the post or bookmark its
+ *     URL — both are user-initiated and open a real tab.
  *
  *   check-vibe: scores a post on demand and shows the result as a toast.
  *     this is the safe fallback if autonomous flair is disallowed.
@@ -31,6 +42,12 @@ export const menu = new Hono();
 
 const dashboardPostKey = (sub: string) => `am:dashboard-post:${sub}`;
 
+/** Canonical permalink for a dashboard post id in a given sub. */
+function dashboardUrl(sub: string, postId: string): string {
+  const shortId = postId.replace('t3_', '');
+  return `https://www.reddit.com/r/${sub}/comments/${shortId}/`;
+}
+
 // ── open aurameter dashboard ──────────────────────────────────────────────────
 
 menu.post('/open-dashboard', async (c) => {
@@ -44,10 +61,9 @@ menu.post('/open-dashboard', async (c) => {
   // reuse existing dashboard post if we already created one
   const existingPostId = await redis.get(dashboardPostKey(sub));
   if (existingPostId) {
-    const shortId = existingPostId.replace('t3_', '');
     return c.json<UiResponse>({
       showToast: 'opening dashboard…',
-      navigateTo: `https://www.reddit.com/r/${sub}/comments/${shortId}/`,
+      navigateTo: dashboardUrl(sub, existingPostId),
     });
   }
 
@@ -59,18 +75,17 @@ menu.post('/open-dashboard', async (c) => {
       entry: 'default',
     });
 
-    // distinguish + sticky are methods on the Post object, not on the reddit client
-    await Promise.all([
-      post.distinguish(),
-      post.sticky(1),
-    ]);
+    // distinguish (mod-only visual) but DO NOT sticky/pin: the dashboard is
+    // reached via the subreddit ••• mod menu ("Open aurameter"), not from a
+    // pinned post at the top of the sub. The post still exists (it's the only
+    // surface the web-view app can render in) — it's just not pinned.
+    await post.distinguish();
 
     await redis.set(dashboardPostKey(sub), post.id);
 
-    const shortId = post.id.replace('t3_', '');
     return c.json<UiResponse>({
-      showToast: 'dashboard created — opening…',
-      navigateTo: `https://www.reddit.com/r/${sub}/comments/${shortId}/`,
+      showToast: 'opening dashboard…',
+      navigateTo: dashboardUrl(sub, post.id),
     });
   } catch (err) {
     console.error('[aurameter] failed to create dashboard post:', err);
@@ -86,7 +101,7 @@ menu.post('/check-vibe', async (c) => {
   const request = await c.req.json<MenuItemRequest>();
   const targetId = request.targetId;
 
-  if (!isT3(targetId)) {
+  if (!targetId || !isT3(targetId)) {
     return c.json<UiResponse>({ showToast: 'check vibe can only be run on a post.' });
   }
 

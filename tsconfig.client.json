@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "customConditions": ["browser"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "outDir": "dist/types/client",
+    "tsBuildInfoFile": "dist/types/client/tsconfig.tsbuildinfo"
+  },
+  "include": ["src/client/**/*", "src/core/**/*"],
+  "comment": "Server-only core files (those importing @devvit/web/server) are excluded: under the browser condition that import resolves to a stub with no `redis`. The client never imports these, so excluding them is safe. If you add another core file that imports @devvit/web/server, add it here too.",
+  "exclude": ["src/core/engine/storage.ts", "src/core/engine/trends.ts"]
+}
