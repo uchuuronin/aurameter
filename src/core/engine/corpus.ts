@@ -169,6 +169,42 @@ export async function corpusSize(): Promise<number> {
   return all.length;
 }
 
+// ── retrain readiness (Block 2 Task 9) ────────────────────────────────────────
+//
+// The app NEVER fits a model (Devvit can't). The scheduler only FLAGS when the
+// global corpus is worth retraining offline, on a slow cadence. State is a
+// single global marker (am:slopretrain:lastat) holding the ms timestamp of the
+// last retrain; 0/absent = never retrained (so the first eligible rollup flags).
+
+/** ~7 weeks. Retrain is global + occasional; this is the minimum gap between flags. */
+export const RETRAIN_INTERVAL_MS = 7 * 7 * 24 * 60 * 60 * 1000;
+
+/** Don't bother flagging until the corpus is big enough to train on. */
+export const MIN_RETRAIN_CORPUS = 500;
+
+const retrainMarkerKey = () => `am:slopretrain:lastat`;
+
+/** Read the last-retrain timestamp (ms), or 0 if never recorded. */
+export async function loadLastRetrainAt(): Promise<number> {
+  const raw = await redis.get(retrainMarkerKey());
+  const n = raw ? Number(raw) : 0;
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Record that a retrain happened (call after deploying new weights). */
+export async function markRetrained(at: number = Date.now()): Promise<void> {
+  await redis.set(retrainMarkerKey(), String(at));
+}
+
+/**
+ * Pure predicate: is the corpus due for a retrain? True iff it's both big
+ * enough AND enough time has passed since the last retrain. Separated from I/O
+ * so it's unit-testable.
+ */
+export function isRetrainDue(corpusN: number, lastRetrainAt: number, now: number): boolean {
+  return corpusN >= MIN_RETRAIN_CORPUS && now - lastRetrainAt > RETRAIN_INTERVAL_MS;
+}
+
 /**
  * THE harvest gate. Turn a mod verdict on a post into a corpus entry — but only
  * if it's eligible:
@@ -181,22 +217,46 @@ export async function corpusSize(): Promise<number> {
  * Returns true if an entry was appended, false if skipped. Never throws on a
  * skip — callers fire it from trigger handlers.
  */
+/**
+ * TEMP DEBUG (Block 2 playtest): set false to silence the harvest trace once the
+ * passive-harvest path is confirmed working end-to-end on real Reddit. Remove
+ * this constant and the [harvest] log lines before final commit.
+ */
+const HARVEST_DEBUG = true;
+
 export async function appendVerdict(args: {
   postId: string;
   label: SlopLabel;
   source: VerdictSource;
 }): Promise<boolean> {
   const { postId, label, source } = args;
+  if (HARVEST_DEBUG) {
+    console.log(`[harvest] appendVerdict called: post=${postId} label=${label} source=${source}`);
+  }
 
   // Purity gate (passive only). Spot-check bypasses — explicit mod labeling.
   if (source === 'passive') {
     const reason = await loadQueueReason(postId);
-    if (!wasQueuedOnSlop(reason)) return false;
+    const queuedOnSlop = wasQueuedOnSlop(reason);
+    if (HARVEST_DEBUG) {
+      console.log(`[harvest]   queueReason=${JSON.stringify(reason)} wasQueuedOnSlop=${queuedOnSlop}`);
+    }
+    if (!queuedOnSlop) {
+      if (HARVEST_DEBUG) console.log(`[harvest]   SKIP: not queued on a slop>=2 condition`);
+      return false;
+    }
   }
 
   // Need the raw feature vector; without it there's nothing to train on.
   const features = await loadSlopFeatures(postId);
-  if (!features || Object.keys(features).length === 0) return false;
+  const featureCount = features ? Object.keys(features).length : 0;
+  if (HARVEST_DEBUG) {
+    console.log(`[harvest]   loadSlopFeatures -> ${featureCount} keys`);
+  }
+  if (!features || featureCount === 0) {
+    if (HARVEST_DEBUG) console.log(`[harvest]   SKIP: no stored feature vector for ${postId}`);
+    return false;
+  }
 
   await appendCorpusEntry({
     id: newCorpusId(),
@@ -205,5 +265,6 @@ export async function appendVerdict(args: {
     label,
     source,
   });
+  if (HARVEST_DEBUG) console.log(`[harvest]   APPENDED: ${postId} label=${label} source=${source} (${featureCount} features)`);
   return true;
 }

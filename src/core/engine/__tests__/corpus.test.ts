@@ -16,6 +16,12 @@ import {
   appendCorpusEntry,
   readCorpus,
   appendVerdict,
+  corpusSize,
+  isRetrainDue,
+  loadLastRetrainAt,
+  markRetrained,
+  MIN_RETRAIN_CORPUS,
+  RETRAIN_INTERVAL_MS,
   type QueueReason,
   type CorpusEntry,
 } from '../corpus.js';
@@ -229,5 +235,51 @@ describe('appendVerdict purity gate', () => {
   it('spotcheck verdict STILL SKIPS when there are no features', async () => {
     const appended = await appendVerdict({ postId: 't3_scnofeat', label: 0, source: 'spotcheck' });
     expect(appended).toBe(false);
+  });
+});
+
+// ── Task 9: retrain readiness ─────────────────────────────────────────────────
+
+describe('isRetrainDue (pure)', () => {
+  const now = 1_000_000_000_000;
+  const day = 24 * 60 * 60 * 1000;
+
+  it('true when corpus is big enough AND never retrained', () => {
+    expect(isRetrainDue(MIN_RETRAIN_CORPUS, 0, now)).toBe(true);
+    expect(isRetrainDue(MIN_RETRAIN_CORPUS + 100, 0, now)).toBe(true);
+  });
+
+  it('false when corpus is too small, however long ago', () => {
+    expect(isRetrainDue(MIN_RETRAIN_CORPUS - 1, 0, now)).toBe(false);
+  });
+
+  it('false when retrained recently, however big', () => {
+    expect(isRetrainDue(MIN_RETRAIN_CORPUS + 1000, now - day, now)).toBe(false);
+  });
+
+  it('true when big AND last retrain older than the interval', () => {
+    expect(isRetrainDue(MIN_RETRAIN_CORPUS, now - (RETRAIN_INTERVAL_MS + day), now)).toBe(true);
+  });
+
+  it('false exactly at the interval (strictly greater required)', () => {
+    expect(isRetrainDue(MIN_RETRAIN_CORPUS, now - RETRAIN_INTERVAL_MS, now)).toBe(false);
+  });
+});
+
+describe('retrain marker round-trip', () => {
+  it('defaults to 0 when never recorded', async () => {
+    expect(await loadLastRetrainAt()).toBe(0);
+  });
+
+  it('records and reads back a timestamp', async () => {
+    await markRetrained(12345);
+    expect(await loadLastRetrainAt()).toBe(12345);
+  });
+
+  it('corpusSize reflects appended entries', async () => {
+    expect(await corpusSize()).toBe(0);
+    await appendCorpusEntry({ id: 'a', ts: 1, features: {}, label: 0, source: 'passive' });
+    await appendCorpusEntry({ id: 'b', ts: 2, features: {}, label: 1, source: 'passive' });
+    expect(await corpusSize()).toBe(2);
   });
 });

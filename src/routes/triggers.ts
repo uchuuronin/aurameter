@@ -212,10 +212,18 @@ triggers.post('/on-post-submit', async (c) => {
   // Block 2 Task 3: persist the raw Slop feature components so a later mod
   // verdict on this post can rebuild the canonical training vector and harvest
   // it into the corpus. Uses PRE-aggressiveness rawResults (aggressiveness only
-  // touches .score, not .rawFeatures), matching recordSamples. Fire-and-forget.
-  saveSlopFeatures(postId, rawResults.slop.rawFeatures).catch((err) => {
+  // touches .score, not .rawFeatures), matching recordSamples.
+  //
+  // AWAITED (not fire-and-forget): this is a harvest PRECONDITION. appendVerdict
+  // skips any post with no stored features, so if a mod removes a post before
+  // this write lands, the verdict is silently lost. The write is one hSet — cheap
+  // enough to await on the scoring path to guarantee it's durable before the post
+  // can be acted on.
+  try {
+    await saveSlopFeatures(postId, rawResults.slop.rawFeatures);
+  } catch (err) {
     console.error('[aurameter] saveSlopFeatures failed:', err);
-  });
+  }
 
   // 3. Public flair is the ONLY thing observe-only suppresses. Everything else
   //    — scoring, rule evaluation, queue/log routing, the dashboard preview —
@@ -336,9 +344,13 @@ triggers.post('/on-post-delete', async (c) => {
   // onModAction. claimResolved returns true only for the first caller.
   try {
     const firstClaim = await claimResolved(postId);
+    // TEMP DEBUG: on-post-delete is the fallback harvest path for removals.
+    console.log(`[harvest] on-post-delete: post=${postId} claimResolved(first)=${firstClaim}`);
     if (firstClaim) {
       // purity gate inside appendVerdict decides eligibility (slop-queued only).
       await appendVerdict({ postId, label: 1, source: 'passive' });
+    } else {
+      console.log(`[harvest]   SKIP harvest: marker already claimed (handoff or onModAction beat us)`);
     }
   } catch (err) {
     console.error('[aurameter] onPostDelete verdict harvest failed:', err);
@@ -363,12 +375,15 @@ triggers.post('/on-post-delete', async (c) => {
 // NOT resolutions (the post stays up), so they don't claim the marker.
 triggers.post('/on-mod-action', async (c) => {
   const input = (await c.req.json<unknown>().catch(() => null)) as Record<string, unknown> | null;
+  // TEMP DEBUG: unconditional — proves whether Devvit routes mod actions here at all.
+  console.log(`[harvest] on-mod-action FIRED. payload keys: ${input ? Object.keys(input).join(',') : '(none)'}`);
   if (!input) return c.json<TriggerResponse>({});
 
   // action type — try the common field names.
   const action =
     pickString(input, ['action', 'moderationAction', 'actionType', 'type']) ?? '';
   const verdict = classifyModAction(action);
+  console.log(`[harvest]   action="${action}" -> verdict=${verdict}`);
   if (verdict === 'ignore') return c.json<TriggerResponse>({});
 
   // target post id — try the common field names + a nested target object.
@@ -376,6 +391,7 @@ triggers.post('/on-mod-action', async (c) => {
     pickString(input, ['targetId', 'targetPostId', 'postId']) ??
     pickNestedString(input, 'target', ['id', 'postId']) ??
     pickNestedString(input, 'targetPost', ['id', 'postId']);
+  console.log(`[harvest]   resolved postId=${postId ?? '(none)'}`);
   if (!postId || !isT3(postId)) return c.json<TriggerResponse>({});
 
   try {
