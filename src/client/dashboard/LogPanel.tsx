@@ -117,7 +117,7 @@ export function LogPanel() {
   if (entries.length === 0) {
     return (
       <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: '13px' }}>
-        nothing logged yet — dismissals, hand-offs, rule fires, and config changes will appear here
+        nothing logged yet — dismissals, hand-offs, and rule fires will show up here.
       </div>
     );
   }
@@ -243,7 +243,7 @@ export function PassedThroughLine() {
         }}
       >
         {count === 0 ? (
-          <>no posts passed through in the last 24h</>
+          <>quiet day. nothing passed through in the last 24h.</>
         ) : (
           <>{expanded ? '▾' : '▸'} {count} {count === 1 ? 'post' : 'posts'} passed through in the last 24h</>
         )}

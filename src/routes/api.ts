@@ -35,7 +35,7 @@ import { Hono } from 'hono';
 import { context, reddit } from '@devvit/web/server';
 import { isT3 } from '@devvit/shared-types/tid.js';
 import type { Context } from 'hono';
-import type { SubConfig, SignalConfig, SlopSpotCheckConfig } from '../core/config/types.js';
+import type { SubConfig, SignalConfig, SlopSpotCheckConfig, RuleCondition } from '../core/config/types.js';
 import type { SignalName } from '../core/signals/types.js';
 import type { LogEntry } from '../core/dashboard/types.js';
 import {
@@ -53,7 +53,7 @@ import {
 import { readAllTrends } from '../core/engine/trends.js';
 import { defaultBaselines } from '../core/calibration/defaults.js';
 import { PRESETS, type PresetName } from '../core/config/presets.js';
-import { ruleToAutoModYaml, describeRule } from '../core/engine/rules.js';
+import { ruleToAutoModYaml, describeRule, evaluateConditionsAgainstScores } from '../core/engine/rules.js';
 import { validateRulePayload } from '../core/engine/rule-validate.js';
 import {
   selectSpotCheckBatch,
@@ -157,8 +157,6 @@ async function probePostState(postId: string): Promise<ProbeResult> {
     // mod/admin/author already resolved it). Unknown/empty category -> fall
     // through to the boolean flags below.
     const category = typeof p['removedByCategory'] === 'string' ? (p['removedByCategory'] as string) : '';
-    // TEMP DEBUG (queue-drop investigation): reveals the real category + flags.
-    console.log(`[queue-probe] ${postId} removedByCategory="${category}" removed=${p['removed']} spam=${p['spam']} isRemoved=${p['isRemoved']}`);
     if (category && TERMINAL_REMOVED_CATEGORIES.has(category)) {
       return { state: 'gone' };
     }
@@ -403,6 +401,69 @@ api.delete('/config/rule/:id', async (c) => {
     detail: removedRule ? `deleted rule "${removedRule.label}"` : 'deleted a rule',
   }).catch((err) => console.error('[aurameter] config-change log failed:', err));
   return c.json({ ok: true, config: updated });
+});
+
+// ── per-rule dry-run preview (Block 3) ────────────────────────────────────────
+//
+// "This rule would have fired on N posts in the last 7 days." Replays a
+// CANDIDATE rule (not necessarily saved) over the action log — which already
+// carries {postId, scores, ts, title} on every scored post (passed-through +
+// rule-fired entries cover every post). No new storage, no per-post reads, no
+// key enumeration (Devvit has no redis.keys()). Pure evaluator shared with the
+// live rule engine via evaluateConditionsAgainstScores, so preview and reality
+// can't diverge.
+
+const DRYRUN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const DRYRUN_SAMPLE_CAP = 20;
+const DRYRUN_BROAD_THRESHOLD = 100;
+
+api.post('/rules/dryrun', async (c) => {
+  const sub = currentSub();
+  if (!sub) return noSub(c);
+
+  const body = await c.req.json<{ conditions?: unknown }>().catch(() => ({} as { conditions?: unknown }));
+  const conditions = body.conditions;
+  if (!Array.isArray(conditions) || conditions.length === 0) {
+    return c.json({ error: 'conditions (1–3) are required' }, 400);
+  }
+
+  // Pull a generous log slice; keep only the last 7 days of post-bearing,
+  // scored entries (passed-through / rule-fired and any other entry that
+  // carries a postId + scores). Dedup by postId — a post can appear multiple
+  // times (rule-fired then dismissed); keep the first scored sighting.
+  const cutoff = Date.now() - DRYRUN_WINDOW_MS;
+  const entries = await readLog(sub, { limit: 1000 });
+
+  const seen = new Set<string>();
+  let count = 0;
+  const sample: Array<{ postId: string; scores: Record<SignalName, number>; title?: string; ts: number }> = [];
+
+  for (const e of entries) {
+    if (e.ts < cutoff) continue;
+    if (!e.postId || !e.scores) continue;
+    if (seen.has(e.postId)) continue;
+    seen.add(e.postId);
+
+    if (evaluateConditionsAgainstScores(conditions as RuleCondition[], e.scores)) {
+      count++;
+      if (sample.length < DRYRUN_SAMPLE_CAP) {
+        sample.push(
+          e.title
+            ? { postId: e.postId, scores: e.scores, title: e.title, ts: e.ts }
+            : { postId: e.postId, scores: e.scores, ts: e.ts }
+        );
+      }
+    }
+  }
+
+  return c.json({
+    count,
+    tooBroad: count > DRYRUN_BROAD_THRESHOLD,
+    sampleCap: DRYRUN_SAMPLE_CAP,
+    windowDays: 7,
+    poolSize: seen.size,
+    sample,
+  });
 });
 
 api.get('/queue', async (c) => {

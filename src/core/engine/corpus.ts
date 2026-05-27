@@ -217,46 +217,22 @@ export function isRetrainDue(corpusN: number, lastRetrainAt: number, now: number
  * Returns true if an entry was appended, false if skipped. Never throws on a
  * skip — callers fire it from trigger handlers.
  */
-/**
- * TEMP DEBUG (Block 2 playtest): set false to silence the harvest trace once the
- * passive-harvest path is confirmed working end-to-end on real Reddit. Remove
- * this constant and the [harvest] log lines before final commit.
- */
-const HARVEST_DEBUG = false; // true if you want verbose logs (debugging)
-
 export async function appendVerdict(args: {
   postId: string;
   label: SlopLabel;
   source: VerdictSource;
 }): Promise<boolean> {
   const { postId, label, source } = args;
-  if (HARVEST_DEBUG) {
-    console.log(`[harvest] appendVerdict called: post=${postId} label=${label} source=${source}`);
-  }
 
   // Purity gate (passive only). Spot-check bypasses — explicit mod labeling.
   if (source === 'passive') {
     const reason = await loadQueueReason(postId);
-    const queuedOnSlop = wasQueuedOnSlop(reason);
-    if (HARVEST_DEBUG) {
-      console.log(`[harvest]   queueReason=${JSON.stringify(reason)} wasQueuedOnSlop=${queuedOnSlop}`);
-    }
-    if (!queuedOnSlop) {
-      if (HARVEST_DEBUG) console.log(`[harvest]   SKIP: not queued on a slop>=2 condition`);
-      return false;
-    }
+    if (!wasQueuedOnSlop(reason)) return false;
   }
 
   // Need the raw feature vector; without it there's nothing to train on.
   const features = await loadSlopFeatures(postId);
-  const featureCount = features ? Object.keys(features).length : 0;
-  if (HARVEST_DEBUG) {
-    console.log(`[harvest]   loadSlopFeatures -> ${featureCount} keys`);
-  }
-  if (!features || featureCount === 0) {
-    if (HARVEST_DEBUG) console.log(`[harvest]   SKIP: no stored feature vector for ${postId}`);
-    return false;
-  }
+  if (!features || Object.keys(features).length === 0) return false;
 
   await appendCorpusEntry({
     id: newCorpusId(),
@@ -265,6 +241,5 @@ export async function appendVerdict(args: {
     label,
     source,
   });
-  if (HARVEST_DEBUG) console.log(`[harvest]   APPENDED: ${postId} label=${label} source=${source} (${featureCount} features)`);
   return true;
 }

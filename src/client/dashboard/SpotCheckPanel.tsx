@@ -209,7 +209,7 @@ export function SpotCheckPanel() {
             <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: '13px' }}>loading batch…</div>
           ) : batch.length === 0 ? (
             <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: '13px' }}>
-              nothing to review right now — a new batch arrives on your {cadence} cadence
+              all caught up — a new batch arrives on your {cadence} cadence.
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>

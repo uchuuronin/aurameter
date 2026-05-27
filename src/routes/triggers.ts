@@ -347,13 +347,9 @@ triggers.post('/on-post-delete', async (c) => {
   // onModAction. claimResolved returns true only for the first caller.
   try {
     const firstClaim = await claimResolved(postId);
-    // TEMP DEBUG: on-post-delete is the fallback harvest path for removals.
-    console.log(`[harvest] on-post-delete: post=${postId} claimResolved(first)=${firstClaim}`);
     if (firstClaim) {
       // purity gate inside appendVerdict decides eligibility (slop-queued only).
       await appendVerdict({ postId, label: 1, source: 'passive' });
-    } else {
-      console.log(`[harvest]   SKIP harvest: marker already claimed (handoff or onModAction beat us)`);
     }
   } catch (err) {
     console.error('[aurameter] onPostDelete verdict harvest failed:', err);
@@ -373,20 +369,21 @@ triggers.post('/on-post-delete', async (c) => {
 // If approvals turn out not to fire, removals still arrive via onPostDelete and
 // spot-check supplies negatives — the loop degrades gracefully (plan fallback).
 //
-// Dedupe: a removal seen here AND by onPostDelete must count once. We gate the
-// positive path on claimResolved (same marker onPostDelete uses). Approvals are
-// NOT resolutions (the post stays up), so they don't claim the marker.
+// Dedupe + integrity: a slop-queued post's FIRST human verdict wins and locks
+// the post via the shared resolution marker, so a later opposite action can't
+// double-harvest the same feature vector with a contradictory label. Both
+// remove (label 1) and approve (label 0) claim the marker; onPostDelete uses
+// the same marker, so whichever fires first records the verdict and the rest
+// skip. (The post staying UP on Reddit after an approve is independent of
+// whether its corpus verdict is settled.)
 triggers.post('/on-mod-action', async (c) => {
   const input = (await c.req.json<unknown>().catch(() => null)) as Record<string, unknown> | null;
-  // TEMP DEBUG: unconditional — proves whether Devvit routes mod actions here at all.
-  console.log(`[harvest] on-mod-action FIRED. payload keys: ${input ? Object.keys(input).join(',') : '(none)'}`);
   if (!input) return c.json<TriggerResponse>({});
 
   // action type — try the common field names.
   const action =
     pickString(input, ['action', 'moderationAction', 'actionType', 'type']) ?? '';
   const verdict = classifyModAction(action);
-  console.log(`[harvest]   action="${action}" -> verdict=${verdict}`);
   if (verdict === 'ignore') return c.json<TriggerResponse>({});
 
   // target post id — try the common field names + a nested target object.
@@ -394,21 +391,20 @@ triggers.post('/on-mod-action', async (c) => {
     pickString(input, ['targetId', 'targetPostId', 'postId']) ??
     pickNestedString(input, 'target', ['id', 'postId']) ??
     pickNestedString(input, 'targetPost', ['id', 'postId']);
-  console.log(`[harvest]   resolved postId=${postId ?? '(none)'}`);
   if (!postId || !isT3(postId)) return c.json<TriggerResponse>({});
 
   try {
-    if (verdict === 'ai-positive') {
-      // a removal/spam: dedupe against onPostDelete via the resolution marker.
-      const firstClaim = await claimResolved(postId);
-      if (firstClaim) {
-        await appendVerdict({ postId, label: 1, source: 'passive' });
-      }
-    } else {
-      // non-ai-negative (approve): the post stays up, so this is NOT a
-      // resolution — don't claim the marker. Purity gate inside appendVerdict
-      // still requires the post to have been slop-queued.
-      await appendVerdict({ postId, label: 0, source: 'passive' });
+    // First human verdict on a slop-queued post wins, and locks the post so a
+    // later opposite action can't double-harvest it with a contradictory label
+    // (e.g. approve -> author later deletes -> onPostDelete would otherwise add
+    // a label=1 for the same feature vector). BOTH branches gate on the shared
+    // resolution marker: whoever claims it first records the verdict; the loser
+    // (and any later onPostDelete) skips. The post staying UP on Reddit after an
+    // approve is independent of whether its corpus verdict is settled.
+    const firstClaim = await claimResolved(postId);
+    if (firstClaim) {
+      const label = verdict === 'ai-positive' ? 1 : 0;
+      await appendVerdict({ postId, label, source: 'passive' });
     }
   } catch (err) {
     console.error('[aurameter] onModAction verdict harvest failed:', err);

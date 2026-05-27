@@ -14,6 +14,7 @@
  */
 
 import type { RuleAction, RuleCondition, RuleConfig, SubConfig } from '../config/types.js';
+import type { SignalName } from '../signals/types.js';
 import type { SignalResults } from './score.js';
 
 export interface RuleMatch {
@@ -21,8 +22,16 @@ export interface RuleMatch {
   action: RuleAction;
 }
 
-function evaluateCondition(condition: RuleCondition, results: SignalResults): boolean {
-  const score = results[condition.signal].score;
+/**
+ * Evaluate one condition against a plain 0–5 scores map. The single source of
+ * truth for comparator semantics — both the live evaluator (over SignalResults)
+ * and the dry-run preview (over stored scores) route through this so they can
+ * never diverge. Pure.
+ */
+export function evaluateConditionScore(
+  condition: RuleCondition,
+  score: number
+): boolean {
   switch (condition.comparator) {
     case '>=': return score >= condition.threshold;
     case '>': return score > condition.threshold;
@@ -31,6 +40,10 @@ function evaluateCondition(condition: RuleCondition, results: SignalResults): bo
     case '<=': return score <= condition.threshold;
     default: return false;
   }
+}
+
+function evaluateCondition(condition: RuleCondition, results: SignalResults): boolean {
+  return evaluateConditionScore(condition, results[condition.signal].score);
 }
 
 export function evaluateRules(
@@ -50,6 +63,25 @@ export function evaluateRules(
   }
 
   return matches;
+}
+
+/**
+ * Dry-run predicate (Block 3): does a candidate rule's conditions ALL match a
+ * post's stored 0–5 scores? AND semantics within the rule, mirroring
+ * evaluateRules. Pure — used by the /api/rules/dryrun endpoint to replay a
+ * not-yet-saved rule over the last 7 days of logged post scores.
+ *
+ * A missing signal in the scores map is treated as score 0 (a post that never
+ * scored that signal). `conditions` must be non-empty (a zero-condition rule is
+ * rejected upstream by rule-validate); an empty array returns false here so a
+ * malformed candidate can't "match everything".
+ */
+export function evaluateConditionsAgainstScores(
+  conditions: RuleCondition[],
+  scores: Record<SignalName, number>
+): boolean {
+  if (!Array.isArray(conditions) || conditions.length === 0) return false;
+  return conditions.every((c) => evaluateConditionScore(c, scores[c.signal] ?? 0));
 }
 
 /**

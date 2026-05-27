@@ -18,6 +18,7 @@
 
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import type { dashboardPayload, trendSeries } from '../../core/dashboard/types.js';
+import { signalMeta } from '../../core/dashboard/types.js';
 import type { SignalName } from '../../core/signals/types.js';
 import { bridge } from './bridge.js';
 import { QueuePanel } from './QueuePanel.js';
@@ -47,6 +48,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('queue');
   const [refreshing, setRefreshing] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
 
   // Initial load
   useEffect(() => {
@@ -107,7 +109,24 @@ export function App() {
       {/* header + tab bar */}
       <div style={{ padding: '10px 14px 0', background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-          <div style={{ fontWeight: 700, fontSize: '16px' }}>📊 aurameter</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ fontWeight: 700, fontSize: '16px' }}>📊 aurameter</div>
+            <button
+              onClick={() => setShowAbout((s) => !s)}
+              title={showAbout ? 'Hide info' : 'What is aurameter?'}
+              aria-label="What is aurameter?"
+              style={{
+                width: '20px', height: '20px', borderRadius: '50%',
+                border: '1px solid var(--border)', background: showAbout ? 'var(--accent)' : 'var(--surface-2)',
+                color: showAbout ? '#fff' : 'var(--fg-muted)',
+                fontSize: '11px', fontWeight: 700, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                lineHeight: 1, padding: 0,
+              }}
+            >
+              ?
+            </button>
+          </div>
           {data.config.observeOnly && (
             <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '999px', background: 'rgba(255,214,53,.15)', color: '#b8930f', border: '1px solid #b8930f', fontWeight: 500 }}>
               observe-only
@@ -133,6 +152,41 @@ export function App() {
           ))}
         </div>
       </div>
+
+      {/* About panel — opt-in orientation, opens via the "?" in the header */}
+      {showAbout && (
+        <div style={{
+          padding: '12px 14px', background: 'var(--surface-2)',
+          borderBottom: '1px solid var(--border)', flexShrink: 0,
+          fontSize: '12px', lineHeight: 1.5, color: 'var(--fg)',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' }}>
+            <div style={{ fontWeight: 700, fontSize: '13px' }}>What is aurameter?</div>
+            <button
+              onClick={() => setShowAbout(false)}
+              aria-label="Close"
+              style={{ border: 'none', background: 'transparent', color: 'var(--fg-muted)', cursor: 'pointer', fontSize: '14px', padding: 0, lineHeight: 1 }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ color: 'var(--fg-muted)', marginBottom: '6px' }}>
+            Scores every new post on four signals and sends drama to triage, so you can work the queue here instead of scrolling Reddit.
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 18px', marginBottom: '6px' }}>
+            <span><span style={{ color: signalMeta.tea.color, fontWeight: 600 }}>☕ Tea</span> — drama / stakes</span>
+            <span><span style={{ color: signalMeta.time.color, fontWeight: 600 }}>⏰ Time</span> — urgency</span>
+            <span><span style={{ color: signalMeta.clown.color, fontWeight: 600 }}>🤡 Bias</span> — one-sided framing</span>
+            <span><span style={{ color: signalMeta.slop.color, fontWeight: 600 }}>🤖 Slop</span> — likely AI</span>
+          </div>
+          <div style={{ color: 'var(--fg-muted)', marginBottom: '6px' }}>
+            On a queued post: <strong style={{ color: 'var(--fg)' }}>Dismiss</strong> clears it from triage; <strong style={{ color: 'var(--fg)' }}>Take action</strong> hands it off to Reddit's native mod tools to remove/ban — aurameter never removes posts itself.
+          </div>
+          <div style={{ color: 'var(--fg-muted)', fontSize: '11px' }}>
+            Privacy: scores + post titles are stored for the queue and log; post body and author identity are never stored. Anonymous Slop labels improve the shared detector.
+          </div>
+        </div>
+      )}
 
       {/* scrollable content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>

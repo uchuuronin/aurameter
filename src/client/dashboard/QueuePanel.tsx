@@ -126,7 +126,7 @@ export function QueuePanel({ queue, onRefresh }: Props) {
   if (visible.length === 0) {
     return (
       <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: '13px' }}>
-        queue is empty — posts will appear here as they are scored
+        queue is empty — nobody's wedding is tomorrow. yet.
       </div>
     );
   }

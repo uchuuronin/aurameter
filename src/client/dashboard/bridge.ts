@@ -71,6 +71,21 @@ export interface spotCheckPayload {
   batch: spotCheckItem[];
 }
 
+/** Result of a candidate-rule dry-run over the last 7 days (Block 3). */
+export interface dryRunResult {
+  count: number;
+  tooBroad: boolean;
+  sampleCap: number;
+  windowDays: number;
+  poolSize: number;
+  sample: Array<{
+    postId: string;
+    scores: Record<SignalName, number>;
+    title?: string;
+    ts: number;
+  }>;
+}
+
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -153,6 +168,18 @@ class ApiBridge {
   async deleteRule(id: string): Promise<{ ok: boolean; config: SubConfig }> {
     return http(`/api/config/rule/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+    });
+  }
+
+  /**
+   * Dry-run a candidate rule (Block 3): "what would this have caught in the last
+   * 7 days?" Sends the conditions (not necessarily a saved rule); the server
+   * replays them over the action log's stored post scores.
+   */
+  async dryRunRule(conditions: RuleCondition[]): Promise<dryRunResult> {
+    return http<dryRunResult>(`/api/rules/dryrun`, {
+      method: 'POST',
+      body: JSON.stringify({ conditions }),
     });
   }
 
