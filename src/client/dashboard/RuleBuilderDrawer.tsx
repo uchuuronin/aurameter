@@ -3,13 +3,19 @@
  * rule builder drawer — compose a single custom rule (1–3 AND conditions + one action).
  * Add + delete only (no edit). Comparators restricted to >= and <= here; the engine
  * still supports = for preset rules, which are shown read-in-list elsewhere.
+ *
+ * Block 3: a dry-run preview panel sits below the conditions — "this rule would have
+ * fired on N posts in the last 7 days," expandable to sample matches. Debounced; replays
+ * the candidate conditions over the action log server-side. Lets a mod see what a rule
+ * would catch BEFORE saving it.
  */
 
-import { useState } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import type { SubConfig, RuleCondition, RuleAction } from '../../core/config/types.js';
 import type { SignalName } from '../../core/signals/types.js';
 import { signalMeta } from '../../core/dashboard/types.js';
-import { bridge } from './bridge.js';
+import { bridge, type dryRunResult } from './bridge.js';
+import { openPostById } from './nav.js';
 
 interface Props {
   onAdded: (config: SubConfig) => void;
@@ -31,6 +37,126 @@ const inputStyle = {
   padding: '6px 8px', fontSize: '13px', border: '1px solid var(--border)',
   borderRadius: 'var(--radius)', background: 'var(--surface-2)', color: 'var(--fg)',
 } as const;
+
+function truncateTitle(title: string, max = 50): string {
+  const t = title.trim();
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1).trimEnd() + '…';
+}
+
+/** Debounced dry-run preview of the current draft conditions. */
+function DryRunPreview({ conditions }: { conditions: DraftCondition[] }) {
+  const [result, setResult] = useState<dryRunResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (timer.current) clearTimeout(timer.current);
+    if (conditions.length === 0) { setResult(null); return; }
+    setLoading(true);
+    setError(null);
+    timer.current = setTimeout(async () => {
+      try {
+        const r = await bridge.dryRunRule(conditions as RuleCondition[]);
+        setResult(r);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    }, 500);
+    return () => { if (timer.current) clearTimeout(timer.current); };
+    // Re-run whenever the conditions change (signal/comparator/threshold).
+  }, [JSON.stringify(conditions)]);
+
+  return (
+    <div style={{
+      marginTop: '4px', padding: '10px 12px', borderRadius: 'var(--radius)',
+      border: '1px solid var(--border)', background: 'var(--surface-2)', fontSize: '12px',
+    }}>
+      {loading && <span style={{ color: 'var(--fg-muted)' }}>checking the last 7 days…</span>}
+
+      {!loading && error && (
+        <span style={{ color: 'var(--fg-muted)' }}>couldn't preview: {error}</span>
+      )}
+
+      {!loading && !error && result && (
+        <>
+          {result.poolSize === 0 ? (
+            <span style={{ color: 'var(--fg-muted)' }}>
+              no recent history to preview against yet — the preview sharpens as posts are scored.
+            </span>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                <span>
+                  This rule would have fired on{' '}
+                  <strong style={{ color: result.count > 0 ? 'var(--accent)' : 'var(--fg-muted)' }}>
+                    {result.count}
+                  </strong>{' '}
+                  {result.count === 1 ? 'post' : 'posts'} in the last {result.windowDays} days
+                  <span style={{ color: 'var(--fg-muted)' }}> (of {result.poolSize} seen)</span>
+                </span>
+                {result.count > 0 && (
+                  <button
+                    onClick={() => setExpanded((e) => !e)}
+                    style={{ border: 'none', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap' }}
+                  >
+                    {expanded ? 'hide' : 'show me →'}
+                  </button>
+                )}
+              </div>
+
+              {result.tooBroad && (
+                <div style={{ marginTop: '6px', color: '#b8930f' }}>
+                  ⚠ {result.count}+ matches — this rule may be too broad. Tighten thresholds before saving.
+                </div>
+              )}
+
+              {expanded && result.count > 0 && (
+                <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '1px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+                  {result.sample.map((m, idx) => (
+                    <div
+                      key={m.postId}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '8px',
+                        padding: '5px 8px', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)',
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', gap: '5px', flexShrink: 0 }}>
+                        {SIGNALS.filter((s) => (m.scores[s] ?? 0) > 0).map((s) => (
+                          <span key={s} style={{ color: signalMeta[s].color, fontWeight: 600 }}>
+                            {signalMeta[s].emoji}{m.scores[s]}
+                          </span>
+                        ))}
+                      </span>
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--fg-muted)' }}>
+                        {m.title ? truncateTitle(m.title) : m.postId}
+                      </span>
+                      <button
+                        onClick={() => openPostById(m.postId)}
+                        style={{ border: 'none', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', fontSize: '11px', whiteSpace: 'nowrap' }}
+                      >
+                        open →
+                      </button>
+                    </div>
+                  ))}
+                  {result.count > result.sample.length && (
+                    <div style={{ padding: '5px 8px', color: 'var(--fg-muted)', background: 'var(--surface)' }}>
+                      …and {result.count - result.sample.length} more
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 export function RuleBuilderDrawer({ onAdded, onClose }: Props) {
   const [label, setLabel] = useState('');
@@ -123,6 +249,9 @@ export function RuleBuilderDrawer({ onAdded, onClose }: Props) {
                 <button onClick={() => removeCondition(i)} disabled={conditions.length <= 1} style={{ border: 'none', background: 'transparent', cursor: conditions.length <= 1 ? 'not-allowed' : 'pointer', color: 'var(--fg-muted)', opacity: conditions.length <= 1 ? 0.4 : 1, fontSize: '16px' }}>✕</button>
               </div>
             ))}
+
+            {/* Block 3: dry-run preview of the current conditions */}
+            <DryRunPreview conditions={conditions} />
           </div>
 
           {/* action */}

@@ -35,14 +35,19 @@ import {
   computePriority,
   recordDailyAggregate,
   recordSamples,
+  saveSlopFeatures,
   loadBaselines,
   purgePostData,
   registerInstall,
   logOutcome,
+  claimResolved,
 } from '../core/engine/storage.js';
 import { PRESETS, suggestPreset } from '../core/config/presets.js';
 import type { PostInput, SignalName } from '../core/signals/types.js';
-import type { RuleAction, SubConfig } from '../core/config/types.js';
+import type { RuleAction, RuleCondition, SubConfig } from '../core/config/types.js';
+import { appendVerdict, classifyModAction } from '../core/engine/corpus.js';
+import type { QueueReason } from '../core/engine/corpus.js';
+import type { RuleMatch } from '../core/engine/rules.js';
 
 export const triggers = new Hono();
 
@@ -59,6 +64,44 @@ async function seedConfig(sub: string): Promise<SubConfig> {
   await saveConfig(config);
   console.log(`[aurameter] seeded ${sub} with preset "${presetName}", observe-only mode`);
   return config;
+}
+
+/**
+ * Build the queue reason (Block 2 Task 1) from the rules that matched a post.
+ * A post can match multiple rules; we record the UNION of their conditions so
+ * corpus.ts::wasQueuedOnSlop can check whether ANY was a Slop condition. The
+ * ruleId is the first match's id (debugging/attribution only — the purity
+ * decision is made on the conditions, not the id).
+ */
+function buildQueueReason(matches: RuleMatch[]): QueueReason | undefined {
+  if (matches.length === 0) return undefined;
+  const conditions: RuleCondition[] = [];
+  for (const match of matches) {
+    conditions.push(...match.rule.conditions);
+  }
+  return { ruleId: matches[0]!.rule.id, conditions };
+}
+
+/** Defensive payload read: first string-valued field among `names`. */
+function pickString(obj: Record<string, unknown>, names: string[]): string | undefined {
+  for (const n of names) {
+    const v = obj[n];
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  return undefined;
+}
+
+/** Defensive nested read: obj[outer] is an object; first string field among `names`. */
+function pickNestedString(
+  obj: Record<string, unknown>,
+  outer: string,
+  names: string[],
+): string | undefined {
+  const inner = obj[outer];
+  if (inner && typeof inner === 'object') {
+    return pickString(inner as Record<string, unknown>, names);
+  }
+  return undefined;
 }
 
 // onAppInstall
@@ -157,7 +200,7 @@ triggers.post('/on-post-submit', async (c) => {
   // 2. persist results + record samples for next nightly rollup. These feed
   //    trends/calibration and the per-post drilldown regardless of whether the
   //    post ends up queued, so they always run.
-  await savePostResult(postId, sub, results);
+  await savePostResult(postId, sub, results, postInput.title);
   const priority = computePriority(results);
   await recordDailyAggregate(sub, postId, results);
 
@@ -165,6 +208,22 @@ triggers.post('/on-post-submit', async (c) => {
   recordSamples(sub, postId, rawResults).catch((err) => {
     console.error('[aurameter] recordSamples failed:', err);
   });
+
+  // Block 2 Task 3: persist the raw Slop feature components so a later mod
+  // verdict on this post can rebuild the canonical training vector and harvest
+  // it into the corpus. Uses PRE-aggressiveness rawResults (aggressiveness only
+  // touches .score, not .rawFeatures), matching recordSamples.
+  //
+  // AWAITED (not fire-and-forget): this is a harvest PRECONDITION. appendVerdict
+  // skips any post with no stored features, so if a mod removes a post before
+  // this write lands, the verdict is silently lost. The write is one hSet — cheap
+  // enough to await on the scoring path to guarantee it's durable before the post
+  // can be acted on.
+  try {
+    await saveSlopFeatures(postId, rawResults.slop.rawFeatures);
+  } catch (err) {
+    console.error('[aurameter] saveSlopFeatures failed:', err);
+  }
 
   // 3. Public flair is the ONLY thing observe-only suppresses. Everything else
   //    — scoring, rule evaluation, queue/log routing, the dashboard preview —
@@ -203,13 +262,17 @@ triggers.post('/on-post-submit', async (c) => {
       outcome: 'passed-through',
       actor: 'auto',
       scores: scoreSnapshot,
+      title: postInput.title,
     }).catch((err) => console.error('[aurameter] passed-through log failed:', err));
     return c.json<TriggerResponse>({});
   }
 
   // At least one rule matched → this post needs a human. Queue it once (in both
-  // modes, so observe-only is a working triage preview), then handle each match.
-  await addToQueue(sub, postId, priority);
+  // modes, so observe-only is a working triage preview), recording WHY it was
+  // queued (Block 2 purity filter: the union of fired conditions), then handle
+  // each match.
+  const queueReason = buildQueueReason(matches);
+  await addToQueue(sub, postId, priority, queueReason);
 
   for (const match of matches) {
     try {
@@ -225,6 +288,7 @@ triggers.post('/on-post-submit', async (c) => {
           actor: 'auto',
           scores: scoreSnapshot,
           detail: `would fire: ${match.rule.label}`,
+          title: postInput.title,
         }).catch((err) => console.error('[aurameter] rule-fired log failed:', err));
         continue;
       }
@@ -236,6 +300,7 @@ triggers.post('/on-post-submit', async (c) => {
         actor: 'auto',
         scores: scoreSnapshot,
         detail: match.rule.label,
+        title: postInput.title,
       }).catch((err) => console.error('[aurameter] rule-fired log failed:', err));
     } catch (err) {
       console.error(`[aurameter] rule "${match.rule.label}" action failed:`, err);
@@ -275,8 +340,76 @@ triggers.post('/on-post-delete', async (c) => {
   const input = await c.req.json<OnPostDeleteRequest>();
   const postId = input.postId;
   if (!postId || !isT3(postId)) return c.json<TriggerResponse>({});
+
+  // Block 2 Task 4: a removal/deletion is an ai-positive verdict for the Slop
+  // corpus. Harvest BEFORE purging the post data, and dedupe against the shared
+  // resolution marker so a remove isn't double-counted by both onPostDelete and
+  // onModAction. claimResolved returns true only for the first caller.
+  try {
+    const firstClaim = await claimResolved(postId);
+    if (firstClaim) {
+      // purity gate inside appendVerdict decides eligibility (slop-queued only).
+      await appendVerdict({ postId, label: 1, source: 'passive' });
+    }
+  } catch (err) {
+    console.error('[aurameter] onPostDelete verdict harvest failed:', err);
+  }
+
   await purgePostData(postId);
   console.log(`[aurameter] purged data for deleted post ${postId}`);
+  return c.json<TriggerResponse>({});
+});
+
+// onModAction (Block 2 Task 4) — passive verdict capture.
+//
+// OPEN PLATFORM QUESTION (plan): whether Devvit fires this for `approvelink`
+// and the exact payload shape are confirmed only in playtest. We therefore read
+// the payload DEFENSIVELY: pull the action type and target post id from several
+// plausible field names, classify with the pure classifyModAction, and harvest.
+// If approvals turn out not to fire, removals still arrive via onPostDelete and
+// spot-check supplies negatives — the loop degrades gracefully (plan fallback).
+//
+// Dedupe + integrity: a slop-queued post's FIRST human verdict wins and locks
+// the post via the shared resolution marker, so a later opposite action can't
+// double-harvest the same feature vector with a contradictory label. Both
+// remove (label 1) and approve (label 0) claim the marker; onPostDelete uses
+// the same marker, so whichever fires first records the verdict and the rest
+// skip. (The post staying UP on Reddit after an approve is independent of
+// whether its corpus verdict is settled.)
+triggers.post('/on-mod-action', async (c) => {
+  const input = (await c.req.json<unknown>().catch(() => null)) as Record<string, unknown> | null;
+  if (!input) return c.json<TriggerResponse>({});
+
+  // action type — try the common field names.
+  const action =
+    pickString(input, ['action', 'moderationAction', 'actionType', 'type']) ?? '';
+  const verdict = classifyModAction(action);
+  if (verdict === 'ignore') return c.json<TriggerResponse>({});
+
+  // target post id — try the common field names + a nested target object.
+  const postId =
+    pickString(input, ['targetId', 'targetPostId', 'postId']) ??
+    pickNestedString(input, 'target', ['id', 'postId']) ??
+    pickNestedString(input, 'targetPost', ['id', 'postId']);
+  if (!postId || !isT3(postId)) return c.json<TriggerResponse>({});
+
+  try {
+    // First human verdict on a slop-queued post wins, and locks the post so a
+    // later opposite action can't double-harvest it with a contradictory label
+    // (e.g. approve -> author later deletes -> onPostDelete would otherwise add
+    // a label=1 for the same feature vector). BOTH branches gate on the shared
+    // resolution marker: whoever claims it first records the verdict; the loser
+    // (and any later onPostDelete) skips. The post staying UP on Reddit after an
+    // approve is independent of whether its corpus verdict is settled.
+    const firstClaim = await claimResolved(postId);
+    if (firstClaim) {
+      const label = verdict === 'ai-positive' ? 1 : 0;
+      await appendVerdict({ postId, label, source: 'passive' });
+    }
+  } catch (err) {
+    console.error('[aurameter] onModAction verdict harvest failed:', err);
+  }
+
   return c.json<TriggerResponse>({});
 });
 

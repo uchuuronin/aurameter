@@ -41,7 +41,7 @@ export function RulesPanel({ config, onConfigUpdate }: Props) {
 
       {config.rules.length === 0 ? (
         <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: '13px' }}>
-          no rules yet — add one to automate triage on new posts
+          No rules yet. Add a rule when you want to act on a specific pattern.
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

@@ -8,6 +8,6 @@
     "tsBuildInfoFile": "dist/types/client/tsconfig.tsbuildinfo"
   },
   "include": ["src/client/**/*", "src/core/**/*"],
-  "comment": "Server-only core files (those importing @devvit/web/server) are excluded: under the browser condition that import resolves to a stub with no `redis`. The client never imports these, so excluding them is safe. If you add another core file that imports @devvit/web/server, add it here too.",
-  "exclude": ["src/core/engine/storage.ts", "src/core/engine/trends.ts"]
+  "comment": "Server-only core files (those importing @devvit/web/server) are excluded: under the browser condition that import resolves to a stub with no `redis`. The client never imports these, so excluding them is safe. If you add another core file that imports @devvit/web/server, add it here too. __tests__ are excluded too: tests are server-side (they use the redis mock) and are type-checked by tsconfig.server.json, never shipped to the client.",
+  "exclude": ["src/core/engine/storage.ts", "src/core/engine/trends.ts", "src/core/engine/corpus.ts", "src/core/engine/spotcheck.ts", "src/core/**/__tests__/**"]
 }

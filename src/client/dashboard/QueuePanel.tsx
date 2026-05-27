@@ -27,6 +27,13 @@ interface Props {
 const signals: SignalName[] = ['tea', 'time', 'clown', 'slop'];
 const maxScores: Record<SignalName, number> = { tea: 5, time: 5, clown: 5, slop: 5 };
 
+/** Truncate a title for the queue row. Full title is stored; this is display-only. */
+function truncateTitle(title: string, max = 60): string {
+  const t = title.trim();
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1).trimEnd() + '…';
+}
+
 function ScoreBar({ score, max, color }: { score: number; max: number; color: string }) {
   const pct = max > 0 ? (score / max) * 100 : 0;
   return (
@@ -119,7 +126,7 @@ export function QueuePanel({ queue, onRefresh }: Props) {
   if (visible.length === 0) {
     return (
       <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: '13px' }}>
-        queue is empty — posts will appear here as they are scored
+        queue is empty — nobody's wedding is tomorrow. yet.
       </div>
     );
   }
@@ -135,6 +142,7 @@ export function QueuePanel({ queue, onRefresh }: Props) {
       {visible.map((entry, idx) => {
         const scores = entry.result?.scores ?? { tea: 0, time: 0, clown: 0, slop: 0 };
         const age = entry.result?.ts ? formatAge(Date.now() - entry.result.ts) : null;
+        const title = entry.result?.title ? truncateTitle(entry.result.title) : null;
         const isBusy = busy.has(entry.postId);
 
         return (
@@ -152,8 +160,16 @@ export function QueuePanel({ queue, onRefresh }: Props) {
               {entry.priority}
             </div>
 
-            {/* signal bars + faint age line */}
+            {/* title + signal bars + faint age line */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 }}>
+              {title && (
+                <span
+                  title={entry.result?.title}
+                  style={{ fontSize: '12px', fontWeight: 600, color: 'var(--fg)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: '1px' }}
+                >
+                  {title}
+                </span>
+              )}
               {signals.map((sig) => (
                 <div key={sig} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <span style={{ fontSize: '10px', width: '14px', textAlign: 'center' }}>{signalMeta[sig].emoji}</span>

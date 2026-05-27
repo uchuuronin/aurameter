@@ -24,13 +24,18 @@
  *   DELETE /api/config/rule/:id       delete a custom rule by id
  *   POST  /api/queue/dismiss          clear a post from the queue (mod decision)
  *   POST  /api/queue/handoff          hand a post off to Reddit's native mod UI
+ *   GET   /api/spotcheck              current spot-check batch (Block 2)
+ *   POST  /api/spotcheck/verdict      record an AI / not-AI label (Block 2)
+ *   POST  /api/spotcheck/optin        opt in/out + cadence (Block 2)
+ *   POST  /api/spotcheck/reset        reset this sub's slop threshold (Block 2)
+ *   GET   /api/corpus/export          guarded JSONL training-data tap (Block 2 / CI)
  */
 
 import { Hono } from 'hono';
 import { context, reddit } from '@devvit/web/server';
 import { isT3 } from '@devvit/shared-types/tid.js';
 import type { Context } from 'hono';
-import type { SubConfig, SignalConfig } from '../core/config/types.js';
+import type { SubConfig, SignalConfig, SlopSpotCheckConfig, RuleCondition } from '../core/config/types.js';
 import type { SignalName } from '../core/signals/types.js';
 import type { LogEntry } from '../core/dashboard/types.js';
 import {
@@ -39,6 +44,7 @@ import {
   getTopQueue,
   loadPostResult,
   loadBaseline,
+  loadSlopFeatures,
   removeFromQueue,
   claimResolved,
   logOutcome,
@@ -47,8 +53,19 @@ import {
 import { readAllTrends } from '../core/engine/trends.js';
 import { defaultBaselines } from '../core/calibration/defaults.js';
 import { PRESETS, type PresetName } from '../core/config/presets.js';
-import { ruleToAutoModYaml, describeRule } from '../core/engine/rules.js';
+import { ruleToAutoModYaml, describeRule, evaluateConditionsAgainstScores } from '../core/engine/rules.js';
 import { validateRulePayload } from '../core/engine/rule-validate.js';
+import {
+  selectSpotCheckBatch,
+  enqueueSpotCheckBatch,
+  readSpotCheckQueue,
+  recordSpotCheckVerdict,
+  resetSlopThreshold,
+  OPTIN_BATCH,
+  RESET_BATCH,
+  type SpotCheckCandidate,
+} from '../core/engine/spotcheck.js';
+import { exportCorpusJsonl } from '../core/engine/corpus.js';
 export const api = new Hono();
 
 /**
@@ -102,45 +119,68 @@ interface ProbeResult {
  * no longer actionable (removed / spam / deleted / not-found). Also captures the
  * canonical permalink from the same read so the client never reconstructs a
  * fragile URL (§6).
- *
- * - `gone`: read says the post is removed/spam/deleted, or it can't be found
- *   (a thrown not-found error). No longer needs a mod decision → drop it.
- * - `actionable`: live, non-removed post → keep it.
- * - `unknown`: read failed for a transient reason (network/rate-limit). Treated
- *   as `actionable` by callers — we never drop a post because a read flaked
- *   (graceful degradation, §2). We can't distinguish "not found" from "network
- *   blip" without inspecting the error, so we keep the conservative default of
- *   NOT dropping on a thrown error; only an explicit removed/deleted flag on a
- *   successfully-read post drops it. (§9 must-verify #2 refines this in playtest.)
  */
+/**
+ * Reddit `removedByCategory` values that mean a post is TERMINALLY resolved —
+ * a human/admin/author decision that takes it out of triage for good. Any OTHER
+ * non-empty category (notably 'automod_filtered' and 'reports') means the post
+ * was FILTERED INTO the modqueue and is awaiting review — i.e. exactly what
+ * belongs in aurameter's queue, NOT gone.
+ *
+ * This distinction matters because aurameter's own `send_to_modqueue` rule
+ * calls reddit.report(), which makes Reddit populate removedByCategory with a
+ * queue-pending value. Treating any non-empty category as "gone" (the old
+ * behaviour) made reconciliation drop every post aurameter had just queued —
+ * the post would score, fire the rule, get added to the queue, then vanish on
+ * the next hydrate. Pending categories must be KEPT.
+ */
+const TERMINAL_REMOVED_CATEGORIES: ReadonlySet<string> = new Set([
+  'moderator',
+  'deleted',
+  'author',
+  'content_takedown',
+  'copyright_takedown',
+  'reddit',
+  'admin',
+]);
+
 async function probePostState(postId: string): Promise<ProbeResult> {
-  // getPostById requires a T3 id. A queue member that isn't a valid T3 can't be
-  // read, so treat it like a flaked read: 'unknown' → kept, never silently
-  // dropped (§4.2 graceful degradation).
   if (!isT3(postId)) return { state: 'unknown' };
   try {
     const post = await reddit.getPostById(postId);
     if (!post) return { state: 'gone' };
     const p = post as unknown as Record<string, unknown>;
-    const removed = p['removed'] === true || p['spam'] === true || p['isRemoved'] === true;
-    const removedCategory = typeof p['removedByCategory'] === 'string' && p['removedByCategory'].length > 0;
-    if (removed || removedCategory) return { state: 'gone' };
+
+    // A post sitting in the modqueue (filtered/reported, awaiting review) is the
+    // OPPOSITE of gone — it's the whole reason the queue exists. Only treat the
+    // post as gone when removedByCategory is an explicit TERMINAL value (a human
+    // mod/admin/author already resolved it). Unknown/empty category -> fall
+    // through to the boolean flags below.
+    const category = typeof p['removedByCategory'] === 'string' ? (p['removedByCategory'] as string) : '';
+    if (category && TERMINAL_REMOVED_CATEGORIES.has(category)) {
+      return { state: 'gone' };
+    }
+    // If a queue-pending category is present, the post is explicitly still in
+    // triage — keep it, and don't let the (sometimes co-set) removed/spam flags
+    // below false-drop it.
+    const queuePending = category !== '' && !TERMINAL_REMOVED_CATEGORIES.has(category);
+    if (!queuePending) {
+      const removed = p['removed'] === true || p['spam'] === true || p['isRemoved'] === true;
+      if (removed) return { state: 'gone' };
+    }
+
     const permalink = typeof post.permalink === 'string' && post.permalink.length > 0
       ? canonicalPermalink(post.permalink)
       : undefined;
     return permalink ? { state: 'actionable', permalink } : { state: 'actionable' };
   } catch {
-    // Transient failure (or not-found we can't disambiguate). Conservative:
-    // treat as actionable so a flaked read never silently loses a real item.
     return { state: 'unknown' };
   }
 }
 
 /**
  * Normalise whatever permalink shape the platform returns into a full
- * https://www.reddit.com/... URL. Reddit's `permalink` is typically a
- * site-relative path like `/r/<sub>/comments/<id>/slug/`; if it already carries
- * a scheme we leave it untouched.
+ * https://www.reddit.com/... URL.
  */
 function canonicalPermalink(raw: string): string {
   if (/^https?:\/\//i.test(raw)) return raw;
@@ -150,14 +190,13 @@ function canonicalPermalink(raw: string): string {
 
 /**
  * The idempotent resolution side effect for a post that reconciliation is
- * dropping. Gated on claimResolved() so repeated refreshes (by one mod or
- * several) write at most one "resolved on Reddit" log entry. Fire-and-forget at
- * the call site: a logging hiccup must not break queue hydration.
+ * dropping. Gated on claimResolved() so repeated refreshes write at most one
+ * "resolved on Reddit" log entry.
  */
 async function resolveDropped(sub: string, postId: string): Promise<void> {
   await removeFromQueue(sub, postId);
   const firstClaim = await claimResolved(postId);
-  if (!firstClaim) return; // already resolved in-app or by an earlier reconcile
+  if (!firstClaim) return;
   const stored = await loadPostResult(postId);
   await logOutcome(sub, {
     postId,
@@ -165,14 +204,12 @@ async function resolveDropped(sub: string, postId: string): Promise<void> {
     actor: 'auto',
     scores: stored ? stored.scores : null,
     detail: 'resolved on Reddit',
+    ...(stored?.title ? { title: stored.title } : {}),
   });
 }
 
 /**
- * Hydrate the top-N queue with reconciliation folded in. Probes each entry's
- * live state, keeps the actionable ones (attaching the fresh permalink), and
- * fires the idempotent resolution side effect for the dropped ones without
- * blocking the response.
+ * Hydrate the top-N queue with reconciliation folded in.
  */
 async function hydrateQueue(sub: string, n: number) {
   const top = await getTopQueue(sub, n);
@@ -193,7 +230,6 @@ async function hydrateQueue(sub: string, n: number) {
     }
   });
 
-  // fire-and-forget: clear resolved posts + log once; never blocks hydration.
   if (dropped.length > 0) {
     void Promise.all(dropped.map((postId) => resolveDropped(sub, postId))).catch((err) => {
       console.error('[aurameter] reconciliation side effect failed:', err);
@@ -213,11 +249,6 @@ async function hydrateQueue(sub: string, n: number) {
 
 api.get('/health', (c) => c.json({ ok: true, service: 'aurameter' }));
 
-/**
- * returns everything the dashboard needs in one round trip:
- *   config, queue (top 20, reconciled), trends (14 days).
- * the client can refresh individual sections via their own endpoints.
- */
 api.get('/dashboard', async (c) => {
   const sub = currentSub();
   if (!sub) return noSub(c);
@@ -267,14 +298,12 @@ api.post('/config/preset', async (c) => {
   return c.json({ ok: true, config });
 });
 
-/** patch top-level config fields (aggressiveness, observeOnly, rules, etc.) */
 api.patch('/config', async (c) => {
   const sub = currentSub();
   if (!sub) return noSub(c);
   const existing = await loadConfig(sub);
   if (!existing) return c.json({ error: 'no config for sub' }, 404);
   const patch = await c.req.json<Partial<SubConfig>>();
-  // don't allow overwriting subreddit or installedAt via patch
   const merged: SubConfig = {
     ...existing,
     ...patch,
@@ -293,7 +322,6 @@ api.patch('/config', async (c) => {
   return c.json({ ok: true, config: merged });
 });
 
-/** patch a single signal's config without touching the rest */
 api.patch('/config/signal/:signal', async (c) => {
   const sub = currentSub();
   if (!sub) return noSub(c);
@@ -323,7 +351,6 @@ api.patch('/config/signal/:signal', async (c) => {
   return c.json({ ok: true, signal, config: updated.signals[signal] });
 });
 
-/** add a custom automation rule (append to config.rules) */
 api.post('/config/rule', async (c) => {
   const sub = currentSub();
   if (!sub) return noSub(c);
@@ -350,7 +377,6 @@ api.post('/config/rule', async (c) => {
   return c.json({ ok: true, rule: result.rule, config: updated });
 });
 
-/** delete a custom automation rule by id */
 api.delete('/config/rule/:id', async (c) => {
   const sub = currentSub();
   if (!sub) return noSub(c);
@@ -377,6 +403,69 @@ api.delete('/config/rule/:id', async (c) => {
   return c.json({ ok: true, config: updated });
 });
 
+// ── per-rule dry-run preview (Block 3) ────────────────────────────────────────
+//
+// "This rule would have fired on N posts in the last 7 days." Replays a
+// CANDIDATE rule (not necessarily saved) over the action log — which already
+// carries {postId, scores, ts, title} on every scored post (passed-through +
+// rule-fired entries cover every post). No new storage, no per-post reads, no
+// key enumeration (Devvit has no redis.keys()). Pure evaluator shared with the
+// live rule engine via evaluateConditionsAgainstScores, so preview and reality
+// can't diverge.
+
+const DRYRUN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const DRYRUN_SAMPLE_CAP = 20;
+const DRYRUN_BROAD_THRESHOLD = 100;
+
+api.post('/rules/dryrun', async (c) => {
+  const sub = currentSub();
+  if (!sub) return noSub(c);
+
+  const body = await c.req.json<{ conditions?: unknown }>().catch(() => ({} as { conditions?: unknown }));
+  const conditions = body.conditions;
+  if (!Array.isArray(conditions) || conditions.length === 0) {
+    return c.json({ error: 'conditions (1–3) are required' }, 400);
+  }
+
+  // Pull a generous log slice; keep only the last 7 days of post-bearing,
+  // scored entries (passed-through / rule-fired and any other entry that
+  // carries a postId + scores). Dedup by postId — a post can appear multiple
+  // times (rule-fired then dismissed); keep the first scored sighting.
+  const cutoff = Date.now() - DRYRUN_WINDOW_MS;
+  const entries = await readLog(sub, { limit: 1000 });
+
+  const seen = new Set<string>();
+  let count = 0;
+  const sample: Array<{ postId: string; scores: Record<SignalName, number>; title?: string; ts: number }> = [];
+
+  for (const e of entries) {
+    if (e.ts < cutoff) continue;
+    if (!e.postId || !e.scores) continue;
+    if (seen.has(e.postId)) continue;
+    seen.add(e.postId);
+
+    if (evaluateConditionsAgainstScores(conditions as RuleCondition[], e.scores)) {
+      count++;
+      if (sample.length < DRYRUN_SAMPLE_CAP) {
+        sample.push(
+          e.title
+            ? { postId: e.postId, scores: e.scores, title: e.title, ts: e.ts }
+            : { postId: e.postId, scores: e.scores, ts: e.ts }
+        );
+      }
+    }
+  }
+
+  return c.json({
+    count,
+    tooBroad: count > DRYRUN_BROAD_THRESHOLD,
+    sampleCap: DRYRUN_SAMPLE_CAP,
+    windowDays: 7,
+    poolSize: seen.size,
+    sample,
+  });
+});
+
 api.get('/queue', async (c) => {
   const sub = currentSub();
   if (!sub) return noSub(c);
@@ -387,11 +476,6 @@ api.get('/queue', async (c) => {
 
 // ── dismiss / handoff (Block 1 §5) ────────────────────────────────────────────
 
-/**
- * Dismiss a post from the queue — the safe, reversible, ~80% action. Removes it
- * from the worklist, marks it resolved (so reconciliation won't also log it),
- * and records an attributed `dismissed` entry with the scores at the time.
- */
 api.post('/queue/dismiss', async (c) => {
   const sub = currentSub();
   if (!sub) return noSub(c);
@@ -400,26 +484,19 @@ api.post('/queue/dismiss', async (c) => {
   if (!postId) return c.json({ error: 'postId is required' }, 400);
 
   await removeFromQueue(sub, postId);
-  await claimResolved(postId); // dashboard resolution shouldn't be reconciliation-logged
+  await claimResolved(postId);
   const stored = await loadPostResult(postId);
   await logOutcome(sub, {
     postId,
     outcome: 'dismissed',
     actor: currentActor(),
     scores: stored ? stored.scores : null,
+    ...(stored?.title ? { title: stored.title } : {}),
   });
 
   return c.json({ ok: true, postId });
 });
 
-/**
- * Hand a post off to Reddit's native mod UI — the deliberate escalation.
- * aurameter NEVER removes/bans itself (§1.1); it logs intent (`actioned`),
- * removes the post from the worklist immediately (the mod has declared intent;
- * if they bail in Reddit's UI, reconciliation simply won't find it removed next
- * time, and it's recoverable from the log), and returns the canonical permalink
- * for the client to open.
- */
 api.post('/queue/handoff', async (c) => {
   const sub = currentSub();
   if (!sub) return noSub(c);
@@ -427,9 +504,6 @@ api.post('/queue/handoff', async (c) => {
   const postId = body.postId;
   if (!postId) return c.json({ error: 'postId is required' }, 400);
 
-  // Capture the canonical permalink from a live read (same read reconciliation
-  // does). Fall back to the canonical r/<sub>/comments/<id>/ shape if the read
-  // doesn't surface one, so the client always gets a usable URL.
   const probe = await probePostState(postId);
   const permalink = probe.permalink ?? `https://www.reddit.com/r/${sub}/comments/${postId.replace('t3_', '')}/`;
 
@@ -441,17 +515,153 @@ api.post('/queue/handoff', async (c) => {
     actor: currentActor(),
     scores: stored ? stored.scores : null,
     detail: 'handed off to Reddit',
+    ...(stored?.title ? { title: stored.title } : {}),
   });
   await removeFromQueue(sub, postId);
 
   return c.json({ ok: true, postId, permalink });
 });
 
+// ── spot-check (Block 2 Tasks 5–7) ────────────────────────────────────────────
+
 /**
- * Read the unified action log, newest-first. `limit` caps the page size;
- * `before` (a ts in ms) pages further back. This is the data behind the log tab
- * and the "N passed through in last 24h" line.
+ * Build spot-check candidates from the sub's current triage queue: those are
+ * the flagged posts, exactly the pool to sample. Each candidate's continuous
+ * reading is the persisted slop `probability` (Task 3); its discrete score is
+ * the stored slop score. Posts without persisted features are skipped (no
+ * continuous reading to rank on).
  */
+async function buildSpotCheckCandidates(sub: string): Promise<SpotCheckCandidate[]> {
+  const top = await getTopQueue(sub, 100);
+  const candidates: SpotCheckCandidate[] = [];
+  for (const { postId } of top) {
+    const features = await loadSlopFeatures(postId);
+    const stored = await loadPostResult(postId);
+    if (!features) continue;
+    const probability = features['probability'];
+    if (typeof probability !== 'number' || !isFinite(probability)) continue;
+    const score = stored?.scores?.slop ?? 0;
+    candidates.push({ postId, score, composite01: probability });
+  }
+  return candidates;
+}
+
+/** GET current spot-check batch, hydrated with permalinks + stored scores. */
+api.get('/spotcheck', async (c) => {
+  const sub = currentSub();
+  if (!sub) return noSub(c);
+  const config = await loadConfig(sub);
+  const optedIn = config?.slopSpotCheck?.enabled ?? false;
+
+  const postIds = await readSpotCheckQueue(sub, OPTIN_BATCH);
+  const items = await Promise.all(
+    postIds.map(async (postId) => {
+      const [probe, result] = await Promise.all([probePostState(postId), loadPostResult(postId)]);
+      return probe.permalink !== undefined
+        ? { postId, result, permalink: probe.permalink }
+        : { postId, result };
+    })
+  );
+  return c.json({
+    optedIn,
+    cadence: config?.slopSpotCheck?.cadence ?? 'weekly',
+    batch: items,
+  });
+});
+
+/** POST a verdict: record the label, feed the baseline, drop from the queue. */
+api.post('/spotcheck/verdict', async (c) => {
+  const sub = currentSub();
+  if (!sub) return noSub(c);
+  const body = await c.req.json<{ postId?: string; label?: number }>().catch(() => ({} as { postId?: string; label?: number }));
+  const postId = body.postId;
+  const label = body.label;
+  if (!postId) return c.json({ error: 'postId is required' }, 400);
+  if (label !== 0 && label !== 1) return c.json({ error: 'label must be 0 or 1' }, 400);
+
+  const appended = await recordSpotCheckVerdict(sub, postId, label);
+  return c.json({ ok: true, postId, appended });
+});
+
+/** POST opt-in/out + cadence. On enable, select + enqueue an opt-in batch. */
+api.post('/spotcheck/optin', async (c) => {
+  const sub = currentSub();
+  if (!sub) return noSub(c);
+  const existing = await loadConfig(sub);
+  if (!existing) return c.json({ error: 'no config for sub' }, 404);
+
+  const body = await c.req.json<{ enabled?: boolean; cadence?: 'weekly' | 'monthly' }>().catch(() => ({} as { enabled?: boolean; cadence?: 'weekly' | 'monthly' }));
+  const enabled = body.enabled ?? false;
+  const cadence: 'weekly' | 'monthly' = body.cadence === 'monthly' ? 'monthly' : 'weekly';
+
+  let enqueued = 0;
+  if (enabled) {
+    const candidates = await buildSpotCheckCandidates(sub);
+    const batch = selectSpotCheckBatch(candidates, { size: OPTIN_BATCH });
+    await enqueueSpotCheckBatch(sub, batch);
+    enqueued = batch.length;
+  }
+
+  const slopSpotCheck: SlopSpotCheckConfig = {
+    enabled,
+    cadence,
+    lastBatchAt: enabled ? Date.now() : (existing.slopSpotCheck?.lastBatchAt ?? 0),
+  };
+  const updated: SubConfig = { ...existing, slopSpotCheck };
+  await saveConfig(updated);
+
+  void logOutcome(sub, {
+    postId: null,
+    outcome: 'config-change',
+    actor: currentActor(),
+    scores: null,
+    detail: enabled ? `spot-check opt-in (${cadence}), ${enqueued} queued` : 'spot-check opt-out',
+  }).catch((err) => console.error('[aurameter] config-change log failed:', err));
+
+  return c.json({ ok: true, config: updated, enqueued });
+});
+
+/** POST reset: clear this sub's learned slop baseline + enqueue a reset batch. */
+api.post('/spotcheck/reset', async (c) => {
+  const sub = currentSub();
+  if (!sub) return noSub(c);
+
+  await resetSlopThreshold(sub);
+  const candidates = await buildSpotCheckCandidates(sub);
+  const batch = selectSpotCheckBatch(candidates, { size: RESET_BATCH });
+  await enqueueSpotCheckBatch(sub, batch);
+
+  void logOutcome(sub, {
+    postId: null,
+    outcome: 'config-change',
+    actor: currentActor(),
+    scores: null,
+    detail: `reset slop threshold to global default, ${batch.length} queued`,
+  }).catch((err) => console.error('[aurameter] config-change log failed:', err));
+
+  return c.json({ ok: true, enqueued: batch.length });
+});
+
+// ── corpus export (Block 2 Task 9, CI tap) ────────────────────────────────────
+
+/**
+ * Guarded JSONL export of the global Slop corpus, consumed by the offline CI
+ * retrain workflow (tools/slop-trainer), NOT by the dashboard. Guarded by a
+ * shared secret header: set CORPUS_EXPORT_SECRET in the app's environment and
+ * have CI send it as `x-corpus-export-secret`. If the secret isn't configured,
+ * the endpoint is closed (403) — fail safe, since this is the training-data tap.
+ */
+api.get('/corpus/export', async (c) => {
+  const secret = (context as unknown as Record<string, unknown>)['CORPUS_EXPORT_SECRET'];
+  const expected = typeof secret === 'string' ? secret : process.env['CORPUS_EXPORT_SECRET'];
+  if (!expected) return c.json({ error: 'export not configured' }, 403);
+  const provided = c.req.header('x-corpus-export-secret');
+  if (provided !== expected) return c.json({ error: 'forbidden' }, 403);
+
+  const jsonl = await exportCorpusJsonl();
+  return c.body(jsonl, 200, { 'content-type': 'application/x-ndjson' });
+});
+
 api.get('/log', async (c) => {
   const sub = currentSub();
   if (!sub) return noSub(c);
@@ -473,7 +683,6 @@ api.get('/trends', async (c) => {
   return c.json({ trends });
 });
 
-/** full per-post feature breakdown for the drilldown modal */
 api.get('/debug/post/:postId', async (c) => {
   const postId = c.req.param('postId');
   const result = await loadPostResult(postId);
@@ -481,11 +690,6 @@ api.get('/debug/post/:postId', async (c) => {
   return c.json({ result });
 });
 
-/**
- * shows what the scoring model currently knows about a sub:
- *   learned baseline (if any) vs default baseline, side by side.
- * mods can see exactly why score thresholds are where they are.
- */
 api.get('/debug/baseline', async (c) => {
   const sub = currentSub();
   if (!sub) return noSub(c);
@@ -503,7 +707,6 @@ api.get('/debug/baseline', async (c) => {
     note: 'learned is null when sample size < minimum (50 posts per signal)',
   });
 });
-
 
 api.get('/config/automod', async (c) => {
   const sub = currentSub();

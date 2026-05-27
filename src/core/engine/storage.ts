@@ -11,6 +11,8 @@
  *   am:post:<postId>                   → per-post results hash
  *     fields: 'sub', 'scores' (json), 'reasons' (json), 'ts'
  *   am:queue:<sub>                     → sorted set of post ids by composite priority
+ *   am:queuereason:<postId>            → why a post was queued (json hash field 'data'); Slop purity filter (Block 2)
+ *   am:slopfeatures:<postId>           → raw Slop feature vector at scoring time (json hash field 'data'); corpus harvesting (Block 2)
  *   am:agg:<sub>:<yyyy-mm-dd>:<sig>    → sorted set of post ids by score, for daily rollups
  *   am:baseline:<sub>:<sig>            → learned baseline (json), flat hash field 'data'
  *   am:samples:<sub>:<sig>:<feature>   → capped sorted set of raw feature values (score=value, member=postId)
@@ -26,19 +28,22 @@ import type { SubConfig } from '../config/types.js';
 import type { SignalName } from '../signals/types.js';
 import type { signalBaseline } from '../calibration/baseline.js';
 import type { LogEntry } from '../dashboard/types.js';
+import type { QueueReason } from './corpus.js';
 
 // ── key builders ─────────────────────────────────────────────────────────────
 
 export const keys = {
-  installs:  () => `am:installs`,
-  config:    (sub: string) => `am:cfg:${sub}`,
-  post:      (postId: string) => `am:post:${postId}`,
-  queue:     (sub: string) => `am:queue:${sub}`,
-  aggregate: (sub: string, date: string, signal: SignalName) => `am:agg:${sub}:${date}:${signal}`,
-  baseline:  (sub: string, signal: SignalName) => `am:baseline:${sub}:${signal}`,
-  samples:   (sub: string, signal: SignalName, feature: string) => `am:samples:${sub}:${signal}:${feature}`,
-  actionlog: (sub: string) => `am:actionlog:${sub}`,
-  resolved:  (postId: string) => `am:resolved:${postId}`,
+  installs:    () => `am:installs`,
+  config:      (sub: string) => `am:cfg:${sub}`,
+  post:        (postId: string) => `am:post:${postId}`,
+  queue:       (sub: string) => `am:queue:${sub}`,
+  queuereason: (postId: string) => `am:queuereason:${postId}`,
+  slopfeatures:(postId: string) => `am:slopfeatures:${postId}`,
+  aggregate:   (sub: string, date: string, signal: SignalName) => `am:agg:${sub}:${date}:${signal}`,
+  baseline:    (sub: string, signal: SignalName) => `am:baseline:${sub}:${signal}`,
+  samples:     (sub: string, signal: SignalName, feature: string) => `am:samples:${sub}:${signal}:${feature}`,
+  actionlog:   (sub: string) => `am:actionlog:${sub}`,
+  resolved:    (postId: string) => `am:resolved:${postId}`,
 } as const;
 
 /** today's date in yyyy-mm-dd utc. */
@@ -84,12 +89,16 @@ export interface storedPostResult {
   scores: Record<SignalName, number>;
   reasons: Record<SignalName, string[]>;
   ts: number;
+  /** Post title snapshot, for mod identification in the queue/log. May be ''
+   *  for posts scored before this field existed. */
+  title: string;
 }
 
 export async function savePostResult(
   postId: string,
   sub: string,
-  results: SignalResults
+  results: SignalResults,
+  title = ''
 ): Promise<void> {
   const scores: Record<string, number> = {};
   const reasons: Record<string, string[]> = {};
@@ -103,6 +112,7 @@ export async function savePostResult(
     scores: JSON.stringify(scores),
     reasons: JSON.stringify(reasons),
     ts: String(ts),
+    title,
   });
   await redis.expire(keys.post(postId), 60 * 60 * 24 * 30);
 }
@@ -116,6 +126,7 @@ export async function loadPostResult(postId: string): Promise<storedPostResult |
       scores: JSON.parse(raw['scores'] ?? '{}'),
       reasons: JSON.parse(raw['reasons'] ?? '{}'),
       ts: Number(raw['ts'] ?? 0),
+      title: raw['title'] ?? '',
     };
   } catch { return null; }
 }
@@ -131,12 +142,24 @@ export function computePriority(results: SignalResults): number {
   );
 }
 
-export async function addToQueue(sub: string, postId: string, priority: number): Promise<void> {
+export async function addToQueue(
+  sub: string,
+  postId: string,
+  priority: number,
+  reason?: QueueReason
+): Promise<void> {
   await redis.zAdd(keys.queue(sub), { score: priority, member: postId });
   // Cap at 500 most recent high-priority posts. Stale low-priority entries
   // (and entries whose underlying am:post:<id> hash expired after 30 days)
   // can still linger; we accept that for now.
   await redis.zRemRangeByRank(keys.queue(sub), 0, -501);
+  // Block 2 purity filter: record WHY this post was queued so a later mod
+  // verdict can be admitted to (or rejected from) the Slop corpus. Optional so
+  // non-rule queueing paths (reconciliation, future passes) don't have to set
+  // it; only rule-fired queueing carries a reason.
+  if (reason) {
+    await recordQueueReason(postId, reason);
+  }
 }
 
 export async function getTopQueue(
@@ -154,6 +177,60 @@ export async function getTopQueue(
  */
 export async function removeFromQueue(sub: string, postId: string): Promise<void> {
   await redis.zRem(keys.queue(sub), [postId]);
+}
+
+// ── queue reason (Block 2 Task 1, Slop purity filter) ─────────────────────────
+//
+// One per-post marker recording why a post entered the queue: the fired rule's
+// id + the union of fired conditions. corpus.ts :: wasQueuedOnSlop reads this to
+// decide whether a passive mod verdict on the post is Slop-corpus-eligible.
+// Stored as a hash field 'data' (mirrors am:cfg / am:baseline), TTL 90d to
+// match the resolution marker + log retention window.
+
+const QUEUE_REASON_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 days
+
+/** Record why a post was queued. Idempotent (last write wins). */
+export async function recordQueueReason(postId: string, reason: QueueReason): Promise<void> {
+  await redis.hSet(keys.queuereason(postId), { data: JSON.stringify(reason) });
+  await redis.expire(keys.queuereason(postId), QUEUE_REASON_TTL_SECONDS);
+}
+
+/** Read a post's queue reason back, or null if absent/unparseable. */
+export async function loadQueueReason(postId: string): Promise<QueueReason | null> {
+  const raw = await redis.hGet(keys.queuereason(postId), 'data');
+  if (!raw) return null;
+  try { return JSON.parse(raw) as QueueReason; }
+  catch { return null; }
+}
+
+// ── raw Slop feature vector (Block 2 Task 3, corpus harvesting) ───────────────
+//
+// The corpus needs the post's raw Slop feature COMPONENTS (the rawFeatures map
+// slopExtractor returns), not the 0–5 score. We persist them in a separate hash
+// (not the hot am:post hash) so a verdict handler can rebuild the canonical
+// training vector later via slopFeatureVector(). Written from triggers.ts using
+// the PRE-aggressiveness rawResults.slop.rawFeatures, matching recordSamples.
+// 90d TTL to match the resolution / queue-reason markers.
+
+const SLOP_FEATURES_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 days
+
+/** Persist a post's raw Slop feature components. Idempotent (last write wins). */
+export async function saveSlopFeatures(
+  postId: string,
+  features: Record<string, number>
+): Promise<void> {
+  await redis.hSet(keys.slopfeatures(postId), { data: JSON.stringify(features) });
+  await redis.expire(keys.slopfeatures(postId), SLOP_FEATURES_TTL_SECONDS);
+}
+
+/** Read a post's raw Slop feature components, or null if absent/unparseable. */
+export async function loadSlopFeatures(
+  postId: string
+): Promise<Record<string, number> | null> {
+  const raw = await redis.hGet(keys.slopfeatures(postId), 'data');
+  if (!raw) return null;
+  try { return JSON.parse(raw) as Record<string, number>; }
+  catch { return null; }
 }
 
 // ── the unified action log (Block 1 §3) ───────────────────────────────────────
@@ -201,6 +278,7 @@ export async function logOutcome(
     actor: partial.actor,
     scores: partial.scores,
     ...(partial.detail !== undefined ? { detail: partial.detail } : {}),
+    ...(partial.title !== undefined ? { title: partial.title } : {}),
   };
   await appendLog(sub, entry);
 }

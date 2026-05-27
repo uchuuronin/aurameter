@@ -68,6 +68,19 @@ export type RuleAction =
   | { type: 'ping_modmail'; subject: string; body: string }
   | { type: 'require_manual_review' };
 
+/**
+ * Per-sub Slop spot-check opt-in state (Block 2). When enabled, the dashboard
+ * surfaces batches of posts for the mod to label AI / not-AI; those labels feed
+ * the global corpus and nudge this sub's Slop threshold. Optional: absent means
+ * not opted in (the default).
+ */
+export interface SlopSpotCheckConfig {
+  enabled: boolean;
+  cadence: 'weekly' | 'monthly';
+  /** Unix epoch ms of the last batch enqueue; 0 if never. */
+  lastBatchAt: number;
+}
+
 /** The full per-subreddit config. One per install. */
 export interface SubConfig {
   subreddit: string;
@@ -86,4 +99,6 @@ export interface SubConfig {
   rules: RuleConfig[];
   /** Unix epoch ms; used to auto-flip out of observe mode after 7 days. */
   installedAt: number;
+  /** Slop spot-check opt-in state (Block 2). Absent = not opted in. */
+  slopSpotCheck?: SlopSpotCheckConfig;
 }
