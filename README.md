@@ -1,178 +1,131 @@
 # aurameter
 
-A moderation signal layer for Reddit drama communities. Scores every new post on four
-signals, surfaces them as link flair, and gives moderators a triage dashboard for the
-ones worth a closer look.
+A moderation signal layer for Reddit drama subs. It scores every new post on four signals, puts the scores in the link flair, and gives mods a triage dashboard for the ones worth a second look.
 
-Built for the **Reddit Mod Tools Hackathon** on Devvit (Reddit's app platform).
+Built for the Reddit Mod Tools Hackathon on Devvit.
 
 ---
 
 ## What it does
 
-Every new post is scored on four signals, 0–5 each:
+Every new post gets four scores, 0 to 5:
 
-| Signal | Meaning |
+| Signal | What it measures |
 |---|---|
-| ☕ **Tea** | Drama / stakes density — named cast, high-stakes vocabulary, cliffhanger framing |
-| ⏰ **Time** | Urgency — deadlines, "tomorrow," crisis-now language |
-| 🤡 **Bias** | One-sided / bad-faith framing — strawmanning, self-justification, asymmetric narrative |
-| 🤖 **Slop** | Synthetic-text likelihood — stylometric features of AI-generated writing |
+| ☕ Tea | Drama density. Named cast, stakes, cliffhanger endings. |
+| ⏰ Time | Urgency. Deadlines, "tomorrow," crisis-now language. |
+| 🤡 Bias | One-sided framing. Strawmanning, heavy self-justification. |
+| 🤖 Slop | Likelihood the post is AI-generated. Stylometric. |
 
-Scores become link flair (e.g. `☕3 ⏰2 🤖2`), and the mod dashboard gives you:
+Those become link flair, e.g. `☕3 ⏰2 🤖2`. The mod dashboard gives you four tabs:
 
-- **Queue** — posts a rule sent to triage, ranked by composite priority, with the post
-  title for identification.
-- **Signals** — per-signal sparklines + per-signal visibility (Off / Mod-only / Public).
-- **Log** — attributed history of every action, rule fire, and config change. 90-day
-  retention.
-- **Settings** — aggressiveness, presets, the custom rule builder (with a dry-run preview
-  showing what a candidate rule would have caught in the last 7 days before you save it),
-  AutoMod YAML export, and the Slop spot-check opt-in.
+- **Queue.** Posts a rule sent to triage, ranked by composite priority, with titles so you know what you're looking at.
+- **Signals.** Per-signal sparklines, plus a visibility toggle for each one (Off / Mod-only / Public).
+- **Log.** Attributed history of every action, rule fire, and config change. Kept 90 days.
+- **Settings.** Aggressiveness, presets, the custom rule builder (with a dry-run preview that replays the rule over the last 7 days before you save it), AutoMod YAML export, and the Slop spot-check opt-in.
 
 ---
 
 ## Install + first run
 
 1. Add aurameter to your subreddit from the Devvit app directory.
-2. The **"Open aurameter"** mod menu item appears under the subreddit ••• menu. Open it
-   to reach the dashboard.
-3. The first **7 days run in observe mode** — aurameter scores silently, no public flair,
-   no rule actions. This lets it learn your sub's distribution before driving anything.
-   After 7 days it auto-flips to live mode.
-4. In **Settings**, choose your aggressiveness, optionally switch presets, set per-signal
-   visibility, and add custom rules. The rule builder's dry-run preview replays your
-   candidate rule over the last 7 days so you see what it would catch before saving.
-5. Use **Export AutoMod YAML** in Settings to make your aurameter rules survive uninstall
-   — they continue working as native AutoMod rules.
+2. Open the subreddit's ••• menu. "Open aurameter" is in there. That's the dashboard.
+3. The first 7 days are observe mode. aurameter scores silently, no public flair, no rule actions, while it learns your sub's distribution. After 7 days it flips to live on its own.
+4. In Settings, pick your aggressiveness, switch presets if you want, set per-signal visibility, add custom rules. The rule builder's dry-run preview replays your candidate rule over the last 7 days, so you can see what it would catch before you save it.
+5. The "Export AutoMod YAML" button in Settings is your insurance policy. Your aurameter rules become native AutoMod rules in your sub's wiki. They keep working if you ever uninstall.
 
 ---
 
-## The design stance
+## How it's designed
 
-aurameter is a **dismiss-and-handoff workstation**, not a read-only lens and not an
-auto-actor.
+aurameter is a dismiss-and-handoff workstation. It is not a read-only lens, and it is not an auto-actor.
 
-- It owns the **safe, reversible** action: **Dismiss** clears a post from the queue when
-  you've judged it fine.
-- It **hands off** the destructive action: **Take action** opens the post in Reddit's
-  native mod tools, where you remove/ban using Reddit's own controls. aurameter never
-  calls `reddit.remove()` itself.
-- It **reconciles**: when a queued post gets handled on Reddit (by anyone), aurameter
-  detects it's no longer actionable and clears it from the queue.
+The safe, reversible action is aurameter's. **Dismiss** clears a post from the queue when you've judged it fine.
 
-Why this matters: aurameter can never misfire a removal — the moderator is always the
-actor on irreversible actions. The Reddit mod log records the real moderator who acted,
-not the app. The cost is one extra click on destructive actions; that's the *right* amount
-of friction.
+The destructive action is Reddit's. **Take action** opens the post in Reddit's own mod tools, and you remove or ban using Reddit's controls. aurameter never calls `reddit.remove()` itself.
+
+If a queued post gets handled on Reddit by anyone (you, another mod, AutoMod), aurameter notices it's no longer actionable and quietly drops it from the queue.
+
+The point of all that: aurameter can't misfire a removal. The real moderator is always on the record. Reddit's mod log shows who actually acted, not "aurameter did it." The cost is one extra click on destructive actions, which is the right amount of friction for things you can't undo.
 
 ---
 
-## Privacy posture
+## Privacy
 
-aurameter is built to be honest about what it stores and what leaves the install.
+I tried to be honest about what aurameter stores. The rule I followed: this is a tool for mods, not for profiling anyone.
 
-**Stored:**
-- **Moderator usernames** on action and config-change log entries — team accountability,
-  same as Reddit's native mod log.
-- **Post titles** — snapshot at score time, used for identification in the queue and log.
-  Mod-only surface.
-- **Signal scores** per post (the 0–5 integers + the calibrated reading).
-- **Anonymous Slop feature-vectors + binary labels** — see "How Slop learns" below.
+**What it stores:**
+- Mod usernames on action and config-change log entries. Same posture as Reddit's native mod log. Team accountability needs attribution.
+- Post titles. Snapshot at score time, used to identify posts in the queue and log. Mod-only.
+- Signal scores per post (the four integers, plus the calibrated reading).
+- Anonymous Slop feature-vectors and a binary label. See the next section.
 
-**Never stored:**
-- Post **body** content.
-- Author identity, username, reputation, or any cross-post profiling.
+**What it doesn't store:**
+- Post body content.
+- Author identity, username, or any cross-post profile.
+- Author reputation. There's no "show me posters by Clown score" surface. That was a deliberate cut.
 
 **What leaves the install:**
-- Anonymous Slop feature-vectors (numbers) + a single binary label (0/1) — no text, no
-  users, no subreddit name. Pooled across installs to retrain the global Slop detector
-  between versions.
+- Anonymous Slop feature-vectors (numbers) and one binary label (0/1). No text, no users, no subreddit name. These get pooled across installs to retrain the global Slop detector between versions.
 
 **Retention:**
 - Action log: 90 days, purged daily.
 - Per-post score hash: 30-day TTL.
-- Queue reason + Slop feature vector: 90 days.
+- Queue reason and Slop feature vector: 90 days.
 
 ---
 
-## How Slop learns (without adding mod work)
+## How Slop learns
 
-The Slop detector is a stylometric model that improves over time. Two feedback paths
-contribute, both designed to require zero or near-zero extra mod effort:
+The Slop detector is stylometric, and it has to keep up as AI writing drifts. Two feedback paths feed it, both designed to add roughly zero work for mods.
 
-**Passive harvesting** — when a moderator removes or approves a post that aurameter sent
-to the modqueue for high Slop (`slop >= 2`), the verdict becomes a training label. Removed
-→ confirmed AI (label 1), approved → confirmed not-AI (label 0). The first human verdict
-on a post wins and locks it, so a later opposite action can't double-label the same
-example. Purity filter: only posts queued *because* of high Slop are eligible, so a
-Tea- or Bias-routed post doesn't pollute the corpus.
+**Passive harvesting.** When a mod removes or approves a post that aurameter routed to the modqueue *because of high Slop* (`slop >= 2`), the verdict becomes a training label. Remove means confirmed AI, label 1. Approve means confirmed not-AI, label 0. The first human verdict wins and locks the post, so a later opposite action can't double-label the same example. Only posts routed for Slop count, which is what keeps the corpus clean. A Tea- or Bias-routed post that happened to be removed doesn't pollute the AI/not-AI label pool.
 
-**Opt-in spot-check** — in Settings, mods can opt into a small weekly or monthly batch of
-borderline + high-confidence Slop posts to label AI / not-AI explicitly. ~10 posts per
-batch. Verdicts feed both the global corpus and the sub's local Slop threshold, so the
-2↔3 detection boundary self-sharpens.
+**Opt-in spot-check.** In Settings, mods can opt into a small batch of borderline-and-high-confidence Slop posts to label as AI / not-AI. Around 10 posts per batch, weekly or monthly. Verdicts feed both the global corpus and your sub's local Slop threshold, so the 2-vs-3 boundary self-sharpens on your community's writing.
 
-Retraining happens **outside the app** — Devvit has no model-training runtime. The app
-flags when the global corpus is large enough and old enough to warrant a retrain; a
-maintainer pulls the corpus, retrains offline, and ships new model coefficients in the
-next release.
+Retraining happens outside the app. Devvit has no model-training runtime, and that's fine. The app flags when the global corpus is big enough and old enough to retrain. I pull the corpus, retrain offline, and ship new model coefficients in the next release.
 
-A known limitation: aurameter's `Take action` handoff currently doesn't feed the corpus
-(only direct Reddit-native removes/approves do). Posts you action via the dashboard get
-moderated correctly; they just don't contribute a training example. This is the next
-hardening item.
+One known limitation: aurameter's `Take action` handoff doesn't currently feed the corpus. Only direct Reddit-native removes and approves do. Posts you action via the dashboard get moderated correctly, they just don't contribute a training example. That's the next hardening item.
 
 ---
 
 ## Per-signal customization
 
 Each signal has three visibility modes:
-- **Off** — not scored, not displayed.
-- **Mod-only** — scored, visible to mods in the dashboard, not in public flair.
-- **Public** — included in the link flair (`☕3 ⏰2 🤖2` format).
 
-Two things you **cannot** do (by design): create new signals (they're trained models,
-not configuration), or change what a signal means (visibility is the only public dial).
+- **Off.** Not scored, not displayed.
+- **Mod-only.** Scored, visible to mods in the dashboard, not in the public flair.
+- **Public.** Included in the link flair (the `☕3 ⏰2 🤖2` strip).
 
----
-
-## Custom rules + dry-run preview
-
-The rule builder composes IF/AND conditions over the four signals plus an action:
-
-- `slop >= 3` → Send to mod queue with reason "likely synthetic"
-- `tea >= 4 AND time >= 3` → Set flair "drama incoming"
-- `bias >= 4` → Ping modmail
-
-While you edit a rule, a **dry-run preview** replays your candidate conditions over the
-last 7 days of scored posts and tells you the fire rate before you save. If it would
-have fired on 100+ posts, it flags the rule as too broad — the safest way to write
-moderation rules.
-
-Rules can be exported to AutoMod YAML and pasted into your sub's `config/automoderator`
-wiki page so they survive uninstalling aurameter.
+Two things you can't do, on purpose: add a new signal (signals are trained models, not a config field), or change what a signal means. Visibility is the only public-facing dial.
 
 ---
 
-## What's deliberately not in here
+## Custom rules and the dry-run preview
 
-- **No public auto-posting** (weekly digests, "post of the week" features). aurameter
-  doesn't speak in the community feed.
-- **No user-facing dashboard** — this is a mod tool. Public surface is limited to the
-  link flair (and only the signals the mod team set to Public).
-- **No author-side reputation, scoring, or profiling.** A new mod joining a sub running
-  aurameter can't filter the log by "posters by clown score" — that surface doesn't
-  exist, by design.
-- **No `reddit.remove()` calls from the app.** Destructive actions are handed off to
-  Reddit native UI; aurameter is never the actor on an irreversible action.
+The rule builder composes IF/AND conditions over the four signals, plus an action:
+
+- `slop >= 3` → send to mod queue with reason "likely synthetic"
+- `tea >= 4 AND time >= 3` → set flair "drama incoming"
+- `bias >= 4` → ping modmail
+
+While you're editing a rule, the dry-run preview replays your conditions over the last 7 days of scored posts and tells you how often it would have fired. If it would have caught 100+ posts, it flags the rule as too broad. Writing a rule that nukes more posts than you meant to is the most common moderation-tool failure mode, and it's the easiest one to catch before going live.
+
+Rules can be exported to AutoMod YAML and pasted into your sub's `config/automoderator` wiki page, so they outlive aurameter if you ever uninstall.
+
+---
+
+## What aurameter deliberately doesn't do
+
+- No public auto-posting. No weekly digests, no "post of the week" features. aurameter doesn't speak in the community feed.
+- No user-facing dashboard. This is a mod tool. The public surface is the link flair, and only for signals the mod team set to Public.
+- No author scoring. There's no view that lets a mod sort posters by Clown score, because that view doesn't exist.
+- No `reddit.remove()` calls from the app. Destructive actions are handed off to Reddit's UI. aurameter is never the actor on an irreversible action.
 
 ---
 
 ## Tech notes
 
-Built with TypeScript on Devvit Web 0.12.23 — Hono for server-side routes, Preact for
-the dashboard webview, Vite for the build, Vitest for unit tests. Storage is Devvit's
-provided Redis; no external database. Offline Slop trainer is Python.
+TypeScript on Devvit Web 0.12.23. Hono for server routes, Preact for the dashboard webview, Vite for the build, Vitest for tests. Storage is Devvit's Redis, no external database. The offline Slop trainer is Python.
 
-86 unit tests passing (calibration, corpus, spotcheck, rules, rule-validate).
+86 unit tests passing across calibration, corpus, spotcheck, rules, and rule-validate. If any of that sounds wrong in the live install, open an issue — I'd rather hear about it than not.
