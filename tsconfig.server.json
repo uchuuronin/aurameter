@@ -5,5 +5,5 @@
     "outDir": "dist/types/server",
     "tsBuildInfoFile": "dist/types/server/tsconfig.tsbuildinfo"
   },
-  "include": ["src/index.ts", "src/routes/**/*", "src/core/**/*", "vite.config.ts", "vite.client.config.ts", "vitest.config.ts"]
+  "include": ["src/index.ts", "src/routes/**/*", "src/core/**/*", "test/**/*", "vite.config.ts", "vite.client.config.ts", "vitest.config.ts"]
 }

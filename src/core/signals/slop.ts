@@ -57,6 +57,53 @@ function fiveBandThresholds(
   return [a, (a + b) / 2, b, (b + c) / 2, c];
 }
 
+/**
+ * The canonical 9-feature vector the trained Slop model consumes, derived from
+ * the raw feature components an extract() result stores on rawFeatures.
+ *
+ * SINGLE SOURCE OF TRUTH for the runtime↔trainer feature contract (Block 2,
+ * Path A). Four features are transforms of raw components (the `inv*` family);
+ * five are pass-throughs. The Python trainer (features.py :: FEATURE_KEYS) and
+ * the parity harness (ts_score_harness.mts) MUST consume this exact shape, in
+ * this exact order. test_parity.py guards that runtime and trainer agree — and
+ * because the harness calls THIS function, any drift fails that gate.
+ *
+ * The corpus-persistence path (storage.ts :: saveSlopFeatures, Block 2 Task 3)
+ * also routes through here, so banked training vectors are computed by the same
+ * code the parity test exercises. Do not inline these transforms elsewhere.
+ *
+ * Defensive `??` fallbacks mirror the harness: a rawFeatures map from a skipped
+ * or too-short post may be missing keys; we never propagate undefined into a
+ * stored vector.
+ */
+export const SLOP_FEATURE_KEYS = [
+  'invSentenceLengthVariance',
+  'fingerprintRate',
+  'hedgeRate',
+  'emDashRate',
+  'oxfordRate',
+  'invTypeTokenRatio',
+  'invOpenerDiversity',
+  'invQuestionRate',
+  'profanityRate',
+] as const;
+
+export function slopFeatureVector(
+  rawFeatures: Record<string, number>
+): Record<string, number> {
+  return {
+    invSentenceLengthVariance: 1 / (1 + (rawFeatures.sentLenVariance ?? 0) / 50),
+    fingerprintRate: rawFeatures.fingerprintRate ?? 0,
+    hedgeRate: rawFeatures.hedgeRate ?? 0,
+    emDashRate: rawFeatures.emDashRate ?? 0,
+    oxfordRate: rawFeatures.oxfordRate ?? 0,
+    invTypeTokenRatio: 1 - (rawFeatures.ttr ?? 0),
+    invOpenerDiversity: 1 - (rawFeatures.openerDiversity ?? 1),
+    invQuestionRate: 1 / (1 + (rawFeatures.questionRate ?? 0) * 5),
+    profanityRate: rawFeatures.profanityRate ?? 0,
+  };
+}
+
 /** First-word diversity: 1 - (top-word frequency / total sentences). */
 function sentenceOpenerDiversity(sentences: string[]): number {
   if (sentences.length < 3) return 1; // not enough data to score

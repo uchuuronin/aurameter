@@ -6,7 +6,8 @@
  *   signals  : per-signal cards with sparklines + visibility toggles
  *   rules    : custom automation rules
  *   log      : the unified action log (history + undo surface)
- *   settings : aggressiveness, observe-only, preset picker, automod export
+ *   settings : aggressiveness, observe-only, preset picker, automod export,
+ *              and the Slop spot-check opt-in (Block 2)
  */
 
 import { useState, useEffect, useCallback } from 'preact/hooks';
@@ -18,6 +19,7 @@ import { SignalCard } from './SignalCard.js';
 import { SettingsPanel } from './SettingsPanel.js';
 import { RulesPanel } from './RulesPanel.js';
 import { LogPanel, PassedThroughLine } from './LogPanel.js';
+import { SpotCheckPanel } from './SpotCheckPanel.js';
 
 type Tab = 'queue' | 'signals' | 'rules' | 'log' | 'settings';
 
@@ -185,12 +187,13 @@ export function App() {
         )}
 
         {activeTab === 'settings' && (
-          <div style={{ background: 'var(--surface)', borderRadius: 'var(--radius-lg)', padding: '14px', border: '1px solid var(--border)' }}>
+          <div style={{ background: 'var(--surface)', borderRadius: 'var(--radius-lg)', padding: '14px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <SettingsPanel
               config={data.config}
               presets={data.presets}
               onConfigUpdate={(config) => setData((prev) => prev ? { ...prev, config } : prev)}
             />
+            <SpotCheckPanel />
           </div>
         )}
       </div>

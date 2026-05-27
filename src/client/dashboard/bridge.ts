@@ -21,6 +21,10 @@
  *   /api/queue/dismiss           clear a post from the queue
  *   /api/queue/handoff           hand a post off to Reddit's native mod UI
  *   /api/log                     unified action log
+ *   /api/spotcheck               spot-check batch + opt-in state (Block 2)
+ *   /api/spotcheck/verdict       record an AI / not-AI label
+ *   /api/spotcheck/optin         opt in/out + cadence
+ *   /api/spotcheck/reset         reset this sub's slop threshold
  *
  * server→client pushes (if we ever want them) arrive via window.onmessage
  * wrapped as { type: 'devvit-message', data: { message } }. we keep a
@@ -47,6 +51,25 @@ import type {
 
 
 type messageHandler = (msg: serverMessage) => void;
+
+/** One post awaiting a spot-check verdict (Block 2). Mirrors a queueEntry's
+ *  hydrated shape but only carries what the review row needs. */
+export interface spotCheckItem {
+  postId: string;
+  result: {
+    sub: string;
+    scores: Record<SignalName, number>;
+    reasons: Record<SignalName, string[]>;
+    ts: number;
+  } | null;
+  permalink?: string;
+}
+
+export interface spotCheckPayload {
+  optedIn: boolean;
+  cadence: 'weekly' | 'monthly';
+  batch: spotCheckItem[];
+}
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -161,6 +184,43 @@ class ApiBridge {
     params.set('limit', String(opts?.limit ?? 100));
     if (opts?.before !== undefined) params.set('before', String(opts.before));
     return http<{ entries: LogEntry[] }>(`/api/log?${params.toString()}`);
+  }
+
+  // ── spot-check (Block 2) ──────────────────────────────────────────────────
+
+  /** Current spot-check batch + opt-in state. */
+  async getSpotCheck(): Promise<spotCheckPayload> {
+    return http<spotCheckPayload>(`/api/spotcheck`);
+  }
+
+  /** Record an AI (label 1) / not-AI (label 0) verdict for a post. */
+  async spotCheckVerdict(
+    postId: string,
+    label: 0 | 1
+  ): Promise<{ ok: boolean; postId: string; appended: boolean }> {
+    return http(`/api/spotcheck/verdict`, {
+      method: 'POST',
+      body: JSON.stringify({ postId, label }),
+    });
+  }
+
+  /** Opt in/out of spot-check + set cadence. Enabling enqueues a batch. */
+  async spotCheckOptIn(
+    enabled: boolean,
+    cadence: 'weekly' | 'monthly'
+  ): Promise<{ ok: boolean; config: SubConfig; enqueued: number }> {
+    return http(`/api/spotcheck/optin`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled, cadence }),
+    });
+  }
+
+  /** Reset this sub's slop threshold to global default + enqueue a reset batch. */
+  async spotCheckReset(): Promise<{ ok: boolean; enqueued: number }> {
+    return http(`/api/spotcheck/reset`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
   }
 
   onMessage(handler: messageHandler): () => void {
