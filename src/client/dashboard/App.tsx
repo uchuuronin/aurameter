@@ -4,10 +4,16 @@
  * tab layout:
  *   queue    : triage queue (default)
  *   signals  : per-signal cards with sparklines + visibility toggles
- *   rules    : custom automation rules
  *   log      : the unified action log (history + undo surface)
  *   settings : aggressiveness, observe-only, preset picker, automod export,
+ *              the custom-rule builder (folded in from the old Rules tab),
  *              and the Slop spot-check opt-in (Block 2)
+ *
+ * Rules used to be its own tab; it's now a section of Settings (roadmap
+ * "Rules → Settings merge"). Settings already owns the consequences of signals
+ * (flair impact / visibility), so rule creation belongs where you tune what
+ * signals *do*. Removes a tab — the on-brand anti-bloat move. The full builder
+ * (RuleBuilderDrawer) is unchanged; only its entry point relocated.
  */
 
 import { useState, useEffect, useCallback } from 'preact/hooks';
@@ -21,7 +27,7 @@ import { RulesPanel } from './RulesPanel.js';
 import { LogPanel, PassedThroughLine } from './LogPanel.js';
 import { SpotCheckPanel } from './SpotCheckPanel.js';
 
-type Tab = 'queue' | 'signals' | 'rules' | 'log' | 'settings';
+type Tab = 'queue' | 'signals' | 'log' | 'settings';
 
 const signals: SignalName[] = ['tea', 'time', 'clown', 'slop'];
 const trendDays = 14;
@@ -85,12 +91,11 @@ export function App() {
     data.trends.map((t: trendSeries) => [t.signal, t])
   ) as Partial<Record<SignalName, trendSeries>>;
 
-  const tabs: Tab[] = ['queue', 'signals', 'rules', 'log', 'settings'];
+  const tabs: Tab[] = ['queue', 'signals', 'log', 'settings'];
   function tabLabel(t: Tab): string {
     switch (t) {
       case 'queue':    return `Queue (${data!.queue.length})`;
       case 'signals':  return 'Signals';
-      case 'rules':    return `Rules (${data!.config.rules.length})`;
       case 'log':      return 'Log';
       case 'settings': return 'Settings';
     }
@@ -175,13 +180,6 @@ export function App() {
           </div>
         )}
 
-        {activeTab === 'rules' && (
-          <RulesPanel
-            config={data.config}
-            onConfigUpdate={(config) => setData((prev) => prev ? { ...prev, config } : prev)}
-          />
-        )}
-
         {activeTab === 'log' && (
           <LogPanel />
         )}
@@ -191,6 +189,10 @@ export function App() {
             <SettingsPanel
               config={data.config}
               presets={data.presets}
+              onConfigUpdate={(config) => setData((prev) => prev ? { ...prev, config } : prev)}
+            />
+            <RulesPanel
+              config={data.config}
               onConfigUpdate={(config) => setData((prev) => prev ? { ...prev, config } : prev)}
             />
             <SpotCheckPanel />

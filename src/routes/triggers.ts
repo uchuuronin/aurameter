@@ -200,7 +200,7 @@ triggers.post('/on-post-submit', async (c) => {
   // 2. persist results + record samples for next nightly rollup. These feed
   //    trends/calibration and the per-post drilldown regardless of whether the
   //    post ends up queued, so they always run.
-  await savePostResult(postId, sub, results);
+  await savePostResult(postId, sub, results, postInput.title);
   const priority = computePriority(results);
   await recordDailyAggregate(sub, postId, results);
 
@@ -262,6 +262,7 @@ triggers.post('/on-post-submit', async (c) => {
       outcome: 'passed-through',
       actor: 'auto',
       scores: scoreSnapshot,
+      title: postInput.title,
     }).catch((err) => console.error('[aurameter] passed-through log failed:', err));
     return c.json<TriggerResponse>({});
   }
@@ -287,6 +288,7 @@ triggers.post('/on-post-submit', async (c) => {
           actor: 'auto',
           scores: scoreSnapshot,
           detail: `would fire: ${match.rule.label}`,
+          title: postInput.title,
         }).catch((err) => console.error('[aurameter] rule-fired log failed:', err));
         continue;
       }
@@ -298,6 +300,7 @@ triggers.post('/on-post-submit', async (c) => {
         actor: 'auto',
         scores: scoreSnapshot,
         detail: match.rule.label,
+        title: postInput.title,
       }).catch((err) => console.error('[aurameter] rule-fired log failed:', err));
     } catch (err) {
       console.error(`[aurameter] rule "${match.rule.label}" action failed:`, err);

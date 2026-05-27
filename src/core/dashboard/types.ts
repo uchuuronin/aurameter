@@ -23,6 +23,13 @@ export interface queueEntry {
     scores: Record<SignalName, number>;
     reasons: Record<SignalName, string[]>;
     ts: number;
+    /**
+     * Post title, captured at score time and stored on the post-result hash.
+     * Surfaced in the queue row for mod identification (a wall of emoji-bars is
+     * unworkable for non-technical mods). See the storage-policy note on
+     * LogEntry below — titles ARE persisted by deliberate choice.
+     */
+    title?: string;
   } | null;
   /**
    * Canonical post permalink, populated server-side from the live post read at
@@ -56,11 +63,14 @@ export interface dashboardPayload {
 // One append-only attributed record per subreddit. The queue is the subset of
 // posts still awaiting a decision; the log is the full history underneath it.
 //
-// Privacy line (spec §1.2, enforced at the type level): the log records mod
-// usernames (accountability, like Reddit's native mod log) but NEVER post body,
-// title, or author identity. There is deliberately no field to put author data
-// in — `postId` is enough to build a link-out, and everything human-readable is
-// fetched live from Reddit at view time, never persisted.
+// STORAGE POLICY (updated): the log records mod usernames (accountability, like
+// Reddit's native mod log) and, by deliberate choice, a snapshot of the post
+// TITLE at action time — titles give non-technical mods a human reference in
+// the queue and log without opening every post. Titles are short, mod-only
+// surfaces, and Reddit already hands moderators full post content; storing a
+// title snapshot is an accepted tradeoff for usability. We still NEVER store
+// post BODY or author identity — `postId` builds the link-out, and body/author
+// stay live-fetched from Reddit at view time, never persisted.
 
 export type LogOutcome =
   | 'passed-through'  // scored but tripped no rule
@@ -84,6 +94,12 @@ export interface LogEntry {
   scores: Record<SignalName, number> | null;
   /** short human string: rule label, which config field changed, etc. */
   detail?: string;
+  /**
+   * Post title snapshot at action time (see STORAGE POLICY above). Optional:
+   * config-change entries have no post, and older entries written before this
+   * field existed won't carry it.
+   */
+  title?: string;
 }
 
 // ── server → client push messages (future use) ───────────────────────────────
@@ -103,7 +119,7 @@ export type serverMessage =
 export const signalMeta: Record<SignalName, { emoji: string; label: string; color: string }> = {
   tea:   { emoji: '☕', label: 'Tea',   color: '#c47c2b' },
   time:  { emoji: '⏰', label: 'Time',  color: '#3b82f6' },
-  clown: { emoji: '🤡', label: 'Clown', color: '#ef4444' },
+  clown: { emoji: '🤡', label: 'Bias',  color: '#ef4444' },
   slop:  { emoji: '🤖', label: 'Slop',  color: '#8b5cf6' },
 };
 

@@ -222,7 +222,7 @@ export function isRetrainDue(corpusN: number, lastRetrainAt: number, now: number
  * passive-harvest path is confirmed working end-to-end on real Reddit. Remove
  * this constant and the [harvest] log lines before final commit.
  */
-const HARVEST_DEBUG = true;
+const HARVEST_DEBUG = false; // true if you want verbose logs (debugging)
 
 export async function appendVerdict(args: {
   postId: string;

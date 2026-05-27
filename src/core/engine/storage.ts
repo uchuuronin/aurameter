@@ -89,12 +89,16 @@ export interface storedPostResult {
   scores: Record<SignalName, number>;
   reasons: Record<SignalName, string[]>;
   ts: number;
+  /** Post title snapshot, for mod identification in the queue/log. May be ''
+   *  for posts scored before this field existed. */
+  title: string;
 }
 
 export async function savePostResult(
   postId: string,
   sub: string,
-  results: SignalResults
+  results: SignalResults,
+  title = ''
 ): Promise<void> {
   const scores: Record<string, number> = {};
   const reasons: Record<string, string[]> = {};
@@ -108,6 +112,7 @@ export async function savePostResult(
     scores: JSON.stringify(scores),
     reasons: JSON.stringify(reasons),
     ts: String(ts),
+    title,
   });
   await redis.expire(keys.post(postId), 60 * 60 * 24 * 30);
 }
@@ -121,6 +126,7 @@ export async function loadPostResult(postId: string): Promise<storedPostResult |
       scores: JSON.parse(raw['scores'] ?? '{}'),
       reasons: JSON.parse(raw['reasons'] ?? '{}'),
       ts: Number(raw['ts'] ?? 0),
+      title: raw['title'] ?? '',
     };
   } catch { return null; }
 }
@@ -272,6 +278,7 @@ export async function logOutcome(
     actor: partial.actor,
     scores: partial.scores,
     ...(partial.detail !== undefined ? { detail: partial.detail } : {}),
+    ...(partial.title !== undefined ? { title: partial.title } : {}),
   };
   await appendLog(sub, entry);
 }

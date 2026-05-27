@@ -2,11 +2,13 @@
  * log panel — the unified action log (spec §7.1). A plain reverse-chronological
  * list of attributed outcomes:
  *
- *   <time ago> · <outcome> · <actor> · <scores chips> · [open post →]
+ *   <time ago> · <outcome> · <actor> · <title> · <scores chips> · [open post →]
  *
- * Purely textual. No post titles or bodies (we don't persist them — a click
- * goes to Reddit for the human-readable content). This IS the undo surface: a
- * mistakenly-dismissed post is found here and reopened on Reddit (spec §1.2).
+ * The title is a snapshot stored at action time (see dashboard/types.ts storage
+ * policy) so non-technical mods have a human reference without opening each
+ * post; clicking still goes to Reddit for the live, full content. This IS the
+ * undo surface: a mistakenly-dismissed post is found here and reopened on
+ * Reddit (spec §1.2).
  */
 
 import { useState, useEffect, useCallback } from 'preact/hooks';
@@ -18,6 +20,13 @@ import { openPostById } from './nav.js';
 
 const signals: SignalName[] = ['tea', 'time', 'clown', 'slop'];
 const pageLimit = 100;
+
+/** Truncate a title for a log row. Full title is stored; this is display-only. */
+function truncateTitle(title: string, max = 50): string {
+  const t = title.trim();
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1).trimEnd() + '…';
+}
 
 function formatAge(ms: number): string {
   const mins = Math.floor(ms / 60_000);
@@ -117,6 +126,7 @@ export function LogPanel() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
       {entries.map((entry, idx) => {
         const meta = outcomeMeta[entry.outcome];
+        const title = entry.title ? truncateTitle(entry.title) : null;
         return (
           <div
             key={entry.id}
@@ -135,6 +145,14 @@ export function LogPanel() {
             <span style={{ color: 'var(--fg-muted)', whiteSpace: 'nowrap' }}>
               {entry.actor}
             </span>
+            {title && (
+              <span
+                title={entry.title}
+                style={{ color: 'var(--fg)', fontWeight: 500, maxWidth: '40%', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              >
+                {title}
+              </span>
+            )}
             <ScoreChips scores={entry.scores} />
             {entry.detail && (
               <span style={{ color: 'var(--fg-muted)', fontStyle: 'italic', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -188,8 +206,7 @@ function flairVariation(scores: Record<SignalName, number> | null): string {
 /**
  * "N posts passed through in the last 24h" — a quiet line for the Queue tab
  * (spec §7.2). Collapsed: just the tally. Expandable to the list of
- * flair-variations applied + a click-to-redirect per post. Nothing else — no
- * titles, no bodies, no raw score dumps.
+ * flair-variations applied + a click-to-redirect per post.
  */
 export function PassedThroughLine() {
   const [passed, setPassed] = useState<LogEntry[] | null>(null);
@@ -242,7 +259,9 @@ export function PassedThroughLine() {
                 padding: '5px 10px', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)',
               }}
             >
-              <span style={{ fontSize: '11px' }}>{flairVariation(e.scores)}</span>
+              <span style={{ fontSize: '11px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {e.title ? truncateTitle(e.title, 40) : flairVariation(e.scores)}
+              </span>
               {e.postId && (
                 <button
                   onClick={() => openPostById(e.postId as string)}

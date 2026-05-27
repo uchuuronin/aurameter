@@ -120,15 +120,57 @@ interface ProbeResult {
  * canonical permalink from the same read so the client never reconstructs a
  * fragile URL (§6).
  */
+/**
+ * Reddit `removedByCategory` values that mean a post is TERMINALLY resolved —
+ * a human/admin/author decision that takes it out of triage for good. Any OTHER
+ * non-empty category (notably 'automod_filtered' and 'reports') means the post
+ * was FILTERED INTO the modqueue and is awaiting review — i.e. exactly what
+ * belongs in aurameter's queue, NOT gone.
+ *
+ * This distinction matters because aurameter's own `send_to_modqueue` rule
+ * calls reddit.report(), which makes Reddit populate removedByCategory with a
+ * queue-pending value. Treating any non-empty category as "gone" (the old
+ * behaviour) made reconciliation drop every post aurameter had just queued —
+ * the post would score, fire the rule, get added to the queue, then vanish on
+ * the next hydrate. Pending categories must be KEPT.
+ */
+const TERMINAL_REMOVED_CATEGORIES: ReadonlySet<string> = new Set([
+  'moderator',
+  'deleted',
+  'author',
+  'content_takedown',
+  'copyright_takedown',
+  'reddit',
+  'admin',
+]);
+
 async function probePostState(postId: string): Promise<ProbeResult> {
   if (!isT3(postId)) return { state: 'unknown' };
   try {
     const post = await reddit.getPostById(postId);
     if (!post) return { state: 'gone' };
     const p = post as unknown as Record<string, unknown>;
-    const removed = p['removed'] === true || p['spam'] === true || p['isRemoved'] === true;
-    const removedCategory = typeof p['removedByCategory'] === 'string' && p['removedByCategory'].length > 0;
-    if (removed || removedCategory) return { state: 'gone' };
+
+    // A post sitting in the modqueue (filtered/reported, awaiting review) is the
+    // OPPOSITE of gone — it's the whole reason the queue exists. Only treat the
+    // post as gone when removedByCategory is an explicit TERMINAL value (a human
+    // mod/admin/author already resolved it). Unknown/empty category -> fall
+    // through to the boolean flags below.
+    const category = typeof p['removedByCategory'] === 'string' ? (p['removedByCategory'] as string) : '';
+    // TEMP DEBUG (queue-drop investigation): reveals the real category + flags.
+    console.log(`[queue-probe] ${postId} removedByCategory="${category}" removed=${p['removed']} spam=${p['spam']} isRemoved=${p['isRemoved']}`);
+    if (category && TERMINAL_REMOVED_CATEGORIES.has(category)) {
+      return { state: 'gone' };
+    }
+    // If a queue-pending category is present, the post is explicitly still in
+    // triage — keep it, and don't let the (sometimes co-set) removed/spam flags
+    // below false-drop it.
+    const queuePending = category !== '' && !TERMINAL_REMOVED_CATEGORIES.has(category);
+    if (!queuePending) {
+      const removed = p['removed'] === true || p['spam'] === true || p['isRemoved'] === true;
+      if (removed) return { state: 'gone' };
+    }
+
     const permalink = typeof post.permalink === 'string' && post.permalink.length > 0
       ? canonicalPermalink(post.permalink)
       : undefined;
@@ -164,6 +206,7 @@ async function resolveDropped(sub: string, postId: string): Promise<void> {
     actor: 'auto',
     scores: stored ? stored.scores : null,
     detail: 'resolved on Reddit',
+    ...(stored?.title ? { title: stored.title } : {}),
   });
 }
 
@@ -387,6 +430,7 @@ api.post('/queue/dismiss', async (c) => {
     outcome: 'dismissed',
     actor: currentActor(),
     scores: stored ? stored.scores : null,
+    ...(stored?.title ? { title: stored.title } : {}),
   });
 
   return c.json({ ok: true, postId });
@@ -410,6 +454,7 @@ api.post('/queue/handoff', async (c) => {
     actor: currentActor(),
     scores: stored ? stored.scores : null,
     detail: 'handed off to Reddit',
+    ...(stored?.title ? { title: stored.title } : {}),
   });
   await removeFromQueue(sub, postId);
 
