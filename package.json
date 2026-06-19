@@ -25,7 +25,7 @@
     "@devvit/web": "0.12.23",
     "@hono/node-server": "^2.0.3",
     "devvit": "0.12.23",
-    "hono": "4.12.22",
+    "hono": "4.12.23",
     "preact": "^10.22.0"
   },
   "devDependencies": {
